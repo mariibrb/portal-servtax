@@ -127,7 +127,7 @@ def process_xml_file(content, filename):
         return None
 
 # --- ÁREA VISUAL ---
-st.title("PORTAL SERVTAX - AUDITORIA FISCAL")
+st.title("PORTAL TAX NFS-e - AUDITORIA FISCAL")
 
 col1, col2 = st.columns(2)
 
