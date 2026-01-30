@@ -63,7 +63,7 @@ def process_xml_file(content, filename):
             # ISS PRÓPRIO
             'ISS_Valor': get_xml_value(root, ['vISS', 'ValorISS', 'vISSQN', 'iss/vISS']),
             
-            # RETENÇÕES IMPOSTOS FEDERAIS (Ajuste para capturar tags nacionais e de SP)
+            # RETENÇÕES IMPOSTOS FEDERAIS
             'Ret_PIS': get_xml_value(root, ['vPIS', 'ValorPIS', 'vPIS_Ret', 'PISRetido', 'vRetPIS']),
             'Ret_COFINS': get_xml_value(root, ['vCOFINS', 'ValorCOFINS', 'vCOFINS_Ret', 'COFINSRetido', 'vRetCOFINS']),
             'Ret_CSLL': get_xml_value(root, ['vCSLL', 'ValorCSLL', 'vCSLL_Ret', 'CSLLRetido', 'vRetCSLL']),
@@ -73,7 +73,7 @@ def process_xml_file(content, filename):
             'Descricao': get_xml_value(root, ['CodigoServico', 'itemServico', 'cServ', 'xDescServ', 'Discriminacao', 'xServ', 'infCpl', 'xProd'])
         }
 
-        # LÓGICA DE BLINDAGEM DE RETENÇÃO
+        # LÓGICA DE BLINDAGEM DE RETENÇÃO ISS
         if tp_ret_flag == '2' or iss_retido_flag == 'true':
              row['Ret_ISS'] = get_xml_value(root, ['vTotTribMun', 'vISSRetido', 'ValorISS_Retido', 'vRetISS', 'vISSRet', 'iss/vRet'])
         elif iss_retido_flag == 'false' or tp_ret_flag == '1':
@@ -87,7 +87,7 @@ def process_xml_file(content, filename):
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria Fiscal: Mapeamento Universal (SP & Nacional)")
+    st.subheader("Auditoria Fiscal: Diagnóstico de Retenções e Mapeamento Universal")
 
     uploaded_files = st.file_uploader("Upload de XML ou ZIP", type=["xml", "zip"], accept_multiple_files=True)
 
@@ -112,6 +112,15 @@ def main():
             for col in cols_fin:
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
 
+            # --- NOVA COLUNA: DIAGNÓSTICO ---
+            # Compara bruto e líquido para avisar sobre possíveis retenções
+            def gerar_diagnostico(row):
+                if abs(row['Vlr_Bruto'] - row['Vlr_Liquido']) > 0.01:
+                    return "⚠️ ATENÇÃO: Divergência Detectada! Verificar Retenções."
+                return "✅ Valores batem."
+            
+            df['Diagnostico'] = df.apply(gerar_diagnostico, axis=1)
+
             # AJUSTE DA ORDEM DAS COLUNAS: Ret_ISS logo após ISS_Valor
             cols = list(df.columns)
             if 'Ret_ISS' in cols and 'ISS_Valor' in cols:
@@ -129,10 +138,15 @@ def main():
                 header_fmt = workbook.add_format({'bold': True, 'bg_color': '#FF69B4', 'font_color': 'white', 'border': 1})
                 num_fmt = workbook.add_format({'num_format': '#,##0.00'})
                 
+                # Formatação condicional no Excel para o Diagnóstico
+                diag_alerta = workbook.add_format({'bg_color': '#FFC7CE', 'font_color': '#9C0006'})
+                
                 for i, col in enumerate(df.columns):
                     worksheet.write(0, i, col, header_fmt)
                     if col in cols_fin:
                         worksheet.set_column(i, i, 18, num_fmt)
+                    elif col == 'Diagnostico':
+                        worksheet.set_column(i, i, 45)
                     else:
                         worksheet.set_column(i, i, 22)
 
