@@ -117,7 +117,7 @@ def main():
             def gerar_diagnostico(row):
                 if abs(row['Vlr_Bruto'] - row['Vlr_Liquido']) > 0.01:
                     return "⚠️ ATENÇÃO: Divergência Detectada! Verificar Retenções."
-                return "✅ Valores batem."
+                return "✅"
             
             df['Diagnostico'] = df.apply(gerar_diagnostico, axis=1)
 
