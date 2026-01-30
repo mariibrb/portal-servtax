@@ -7,7 +7,7 @@ import zipfile
 # Configuração da Página
 st.set_page_config(page_title="Portal ServTax", layout="wide", page_icon="📑")
 
-# Estilo Rihanna (Rosa e Branco)
+# Estilo Rihanna
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&family=Plus+Jakarta+Sans:wght@400;700&display=swap');
@@ -38,59 +38,59 @@ def flatten_dict(d, parent_key='', sep='_'):
     return dict(items)
 
 def simplify_and_filter(df):
-    """
-    Mantém a lógica estável das colunas anteriores e ajusta apenas Tomador e Descrição.
-    """
     final_df_data = {}
     if 'Arquivo_Origem' in df.columns:
         final_df_data['Arquivo'] = df['Arquivo_Origem']
 
-    # Mapeamento com foco nos ajustes solicitados sem quebrar o que funcionava
-    mapping = {
-        'Nota_Numero': ['numero', 'nnfse', 'numnf', 'nfnr', 'notafiscal'],
-        'Data_Emissao': ['dataemissao', 'dtemic', 'dtrem', 'dhemi', 'dtaemi', 'datahora', 'dh_emi'],
+    # MAPEAMENTO REFINADO - FOCO EM TOMADOR E DESCRIÇÃO
+    targets = {
+        'Nota_Numero': ['numero', 'nnfse', 'numnf', 'nfnr', 'notafiscal', 'nnf'],
+        'Data_Emissao': ['dataemissao', 'dtemic', 'dtrem', 'dhemi', 'dtaemi', 'datahora', 'dh_emi', 'dtemit'],
         
-        # PRESTADOR - Lógica Original Estável
-        'Prestador_CNPJ': ['prestador_cnpj', 'prestador_cpfcnpj', 'emit_cnpj', 'identificacaoprestador_cnpj'],
-        'Prestador_Razao': ['prestador_razaosocial', 'prestador_xnome', 'emit_xnome', 'prestador_nome'],
+        # PRESTADOR / EMITENTE (Estável)
+        'Prestador_CNPJ': ['prestador_cnpj', 'prestador_cpfcnpj', 'emit_cnpj', 'emit_cpf', 'identificacaoprestador_cnpj'],
+        'Prestador_Razao': ['prestador_razaosocial', 'prestador_xnome', 'emit_xnome', 'emit_razao', 'emit_nome'],
         
-        # TOMADOR - Ajuste Fino Reforçado
-        'Tomador_CNPJ': ['tomador_cnpj', 'tomador_cpfcnpj', 'dest_cnpj', 'dest_cpf', 'identificacaotomador_cnpj', 'tomador_id_cnpj', 'dest_id_cnpj', 'cnpj_tomador'],
-        'Tomador_Razao': ['tomador_razaosocial', 'tomador_xnome', 'dest_xnome', 'dest_razao', 'dest_nome', 'tomador_nome', 'razaosocial_tomador'],
+        # TOMADOR / DESTINATÁRIO (Ajuste Fino)
+        'Tomador_CNPJ': ['tomador_cnpj', 'tomador_cpfcnpj', 'dest_cnpj', 'dest_cpf', 'identificacaotomador_cnpj', 'tomador_id_cnpj', 'dest_id_cnpj', 'cpf_cnpj_tomador'],
+        'Tomador_Razao': ['tomador_razaosocial', 'tomador_xnome', 'dest_xnome', 'dest_razao', 'dest_nome', 'tomador_nome', 'razaosocialtomador', 'xnome_dest'],
         
-        # VALORES - Lógica Original Estável
-        'Vlr_Bruto': ['valorservicos', 'vserv', 'vlrserv', 'valorbruto', 'v_serv'],
+        # VALORES
+        'Vlr_Bruto': ['valorservicos', 'vserv', 'vlrserv', 'valorbruto', 'v_serv', 'vlr_serv', 'v_nf'],
         'ISS_Retido': ['issretido', 'vissret', 'iss_retido', 'valoriss', 'viss'],
         'PIS_Retido': ['pisretido', 'vpisret', 'pis_retido', 'valorpis', 'vpis'],
         'COFINS_Retido': ['cofinsretido', 'vcofinsret', 'cofins_retido', 'valorcofins', 'vcofins'],
         'IRRF_Retido': ['valorir', 'vir', 'irrf_retido', 'virrf', 'v_ir'],
         'CSLL_Retido': ['valorcsll', 'vcsll', 'csll_retido', 'v_csll'],
         
-        # DESCRIÇÃO - Ajuste Fino Reforçado
-        'Servico_Descricao': ['discriminacao', 'xserv', 'infadic', 'desc_serv', 'infcpl', 'xprod', 'servico_discriminacao', 'txtservico']
+        # DESCRIÇÃO (Ajuste Fino)
+        'Servico_Descricao': ['discriminacao', 'xserv', 'infadic', 'desc_serv', 'infcpl', 'xprod', 'servico_discriminacao', 'det_xprod', 'detalheservico']
     }
 
-    for friendly_name, radicals in mapping.items():
+    for friendly_name, radicals in targets.items():
         found_series = None
         for col in df.columns:
             c_low = col.lower()
             if any(rad in c_low for rad in radicals):
-                # Proteção para não misturar dados
+                # Filtro de Contexto Rígido
                 if 'prestador' in friendly_name.lower() or 'emit' in friendly_name.lower():
                     if 'tomador' in c_low or 'dest' in c_low: continue
-                if 'tomador' in friendly_name.lower() or 'dest' in friendly_name.lower():
-                    if 'prestador' in c_low or 'emit' in c_low: continue
                 
-                # Bloqueio de endereços para evitar CNPJ errado
-                if not any(x in c_low for x in ['endereco', 'logradouro', 'uf', 'cep', 'bairro', 'municipio']):
-                    if found_series is None or (isinstance(found_series, pd.Series) and found_series.isnull().all()):
+                if 'tomador' in friendly_name.lower() or 'dest' in friendly_name.lower():
+                    # Para Tomador, a coluna PRECISA ter um radical de tomador/dest e NÃO de prestador/emit
+                    if not any(x in c_low for x in ['tomador', 'dest', 'destinatario']): continue
+                    if any(x in c_low for x in ['prestador', 'emit']): continue
+                
+                # Ignora endereços para não pegar CNPJ errado
+                if not any(x in c_low for x in ['endereco', 'logradouro', 'uf', 'cep', 'bairro', 'municipio', 'cidade']):
+                    if found_series is None or found_series.isnull().all():
                         found_series = df[col]
 
         if found_series is not None:
             if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL']):
                 final_df_data[friendly_name] = pd.to_numeric(found_series, errors='coerce').fillna(0.0)
             else:
-                final_df_data[friendly_name] = found_series.fillna("Dado Ausente")
+                final_df_data[friendly_name] = found_series.fillna("Não Identificado")
         else:
             final_df_data[friendly_name] = 0.0 if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL']) else "NÃO LOCALIZADO"
 
@@ -135,12 +135,12 @@ def process_files(uploaded_files):
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria Fiscal: Correção e Estabilidade")
+    st.subheader("Auditoria Fiscal: Mapeamento de Tomadores e Descrições")
 
     uploaded_files = st.file_uploader("Upload de XML ou ZIP", type=["xml", "zip"], accept_multiple_files=True)
 
     if uploaded_files:
-        with st.spinner('Restaurando colunas e refinando tomadores...'):
+        with st.spinner('Refinando captura de dados críticos...'):
             df_raw = process_files(uploaded_files)
         
         if not df_raw.empty:
@@ -162,11 +162,11 @@ def main():
             st.download_button(
                 label="📥 Baixar Excel de Auditoria",
                 data=output.getvalue(),
-                file_name="portal_servtax_estavel.xlsx",
+                file_name="portal_servtax_auditoria.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            st.warning("Nenhum dado encontrado.")
+            st.warning("Nenhum dado encontrado nos arquivos.")
 
 if __name__ == "__main__":
     main()
