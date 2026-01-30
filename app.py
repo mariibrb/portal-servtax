@@ -6,7 +6,7 @@ import zipfile
 
 # --- CONFIGURAÇÃO E INTERFACE ---
 st.set_page_config(
-    page_title="Portal ServTax", 
+    page_title="Portal Tax NFS-e", 
     page_icon="📑", 
     layout="wide"
 )
