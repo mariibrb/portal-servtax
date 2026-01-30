@@ -38,7 +38,7 @@ def process_xml_file(content, filename):
         tree = ET.parse(io.BytesIO(content))
         root = tree.getroot()
         
-        # MAPEAMENTO DE POSSIBILIDADES (Incluindo as novas tags de Tributação Municipal)
+        # MAPEAMENTO DE POSSIBILIDADES (Com inclusão de Tributos Municipais)
         row = {
             'Arquivo': filename,
             'Nota_Numero': get_xml_value(root, ['nNFSe', 'NumeroNFe', 'nNF', 'numero', 'Numero']),
@@ -56,13 +56,13 @@ def process_xml_file(content, filename):
             'Vlr_Bruto': get_xml_value(root, ['vServ', 'ValorServicos', 'vNF', 'vServPrest/vServ', 'ValorTotal']),
             'Vlr_Liquido': get_xml_value(root, ['vLiq', 'ValorLiquidoNFe', 'vLiqNFSe', 'vLiquido', 'vServPrest/vLiq']),
             
-            # ISS PRÓPRIO E TRIBUTOS MUNICIPAIS (Nova análise incluída)
-            'ISS_Valor': get_xml_value(root, ['vISS', 'ValorISS', 'vISSQN', 'iss/vISS', 'vTotTribMun']),
-            'ISS_Aliquota': get_xml_value(root, ['pAliq', 'AliquotaServicos', 'Aliquota']),
+            # ISS PRÓPRIO (Inclusão da tag vTotTribMun solicitada)
+            'ISS_Valor': get_xml_value(root, ['vISS', 'ValorISS', 'vISSQN', 'iss/vISS', 'vTotTribMun', 'vTotTrib/vTotTribMun']),
+            'ISS_Aliquota': get_xml_value(root, ['pAliq', 'AliquotaServicos', 'Aliquota', 'aliq']),
             
             # ISS RETIDO (Mapeamento exaustivo)
             'Ret_ISS': get_xml_value(root, ['vISSRet', 'ValorISS_Retido', 'ISSRetido', 'vISSRetido', 'vRetISS', 'iss/vRet']),
-            'Tipo_Retencao': get_xml_value(root, ['tpRetISSQN', 'ISS_Retido']), # Código 2 = Retido
+            'Tipo_Retencao': get_xml_value(root, ['tpRetISSQN', 'ISS_Retido']),
             
             # DEMAIS RETENÇÕES (Leitura Direta)
             'Ret_PIS': get_xml_value(root, ['vPIS', 'ValorPIS', 'vPIS_Ret', 'PISRetido']),
@@ -79,7 +79,7 @@ def process_xml_file(content, filename):
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria Fiscal Multi-Prefeituras (Mapeamento de ISS e Tributos Municipais)")
+    st.subheader("Auditoria Fiscal Multi-Prefeituras (Mapeamento de Tributos Municipais)")
 
     uploaded_files = st.file_uploader("Upload de XML ou ZIP", type=["xml", "zip"], accept_multiple_files=True)
 
