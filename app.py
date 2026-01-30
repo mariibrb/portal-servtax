@@ -7,23 +7,25 @@ import zipfile
 # Configuração da Página
 st.set_page_config(page_title="Portal ServTax", layout="wide", page_icon="📑")
 
-# Estilo Visual (Rihanna) - Rosa e Branco
+# Estilo Visual (Rihanna)
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&family=Plus+Jakarta+Sans:wght@400;700&display=swap');
     html, body, [class*="css"] { font-family: 'Plus Jakarta Sans', sans-serif; }
     h1, h2, h3 { font-family: 'Montserrat', sans-serif; color: #FF69B4; }
-    .stButton>button { background-color: #FF69B4; color: white; border-radius: 10px; border: none; font-weight: bold; width: 100%; }
+    .stButton>button { background-color: #FF69B4; color: white; border-radius: 10px; border: none; font-weight: bold; width: 100%; height: 3em; }
     .stButton>button:hover { background-color: #FFDEEF; color: #FF69B4; border: 1px solid #FF69B4; }
     [data-testid="stFileUploadDropzone"] { border: 2px dashed #FF69B4; background-color: #FFDEEF; }
     </style>
     """, unsafe_allow_html=True)
 
 def flatten_dict(d, parent_key='', sep='_'):
-    """Transforma o XML aninhado em colunas lineares."""
     items = []
     for k, v in d.items():
-        new_key = f"{parent_key}{sep}{k}" if parent_key else k
+        # Remove prefixos de namespace (ex: ns2:tag -> tag) para facilitar a busca
+        clean_k = k.split(':')[-1] if ':' in k else k
+        new_key = f"{parent_key}{sep}{clean_k}" if parent_key else clean_k
+        
         if isinstance(v, dict):
             items.extend(flatten_dict(v, new_key, sep=sep).items())
         elif isinstance(v, list):
@@ -37,7 +39,6 @@ def flatten_dict(d, parent_key='', sep='_'):
     return dict(items)
 
 def extract_xml_from_zip(zip_data, extracted_list):
-    """Extração recursiva de ZIPs dentro de ZIPs."""
     with zipfile.ZipFile(io.BytesIO(zip_data)) as z:
         for file_info in z.infolist():
             if file_info.filename.lower().endswith('.xml'):
@@ -61,7 +62,7 @@ def process_files(uploaded_files):
         try:
             data_dict = xmltodict.parse(xml_item['content'])
             flat_data = flatten_dict(data_dict)
-            flat_data['arquivo_origem'] = xml_item['name']
+            flat_data['Arquivo_Origem'] = xml_item['name']
             extracted_data.append(flat_data)
         except:
             continue
@@ -69,61 +70,57 @@ def process_files(uploaded_files):
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria Fiscal: Conferência de Retenções e Reforma Tributária")
+    st.subheader("Auditoria Fiscal de NFS-e (Consolidado)")
 
-    st.markdown("""
-    Este módulo realiza a leitura completa de **todas as tags** e exporta as colunas essenciais para conferência de 
-    escrituração (PIS, COFINS, CSLL, IR, ISS, além de IBS e CBS).
-    """)
-
-    uploaded_files = st.file_uploader("Selecione os arquivos XML ou ZIP", type=["xml", "zip"], accept_multiple_files=True)
+    uploaded_files = st.file_uploader("Arraste seus XMLs ou ZIPs aqui", type=["xml", "zip"], accept_multiple_files=True)
 
     if uploaded_files:
-        with st.spinner('Minerando dados fiscais...'):
+        with st.spinner('Extraindo dados...'):
             df_total = process_files(uploaded_files)
         
         if not df_total.empty:
-            # Lista mestre para auditoria (ordenada logicamente)
-            colunas_auditoria = [
-                'arquivo_origem', 'Numero', 'DataEmissao', 'ChaveAcesso',
-                'Prestador_CpfCnpj', 'Prestador_RazaoSocial',
-                'Tomador_CpfCnpj', 'Tomador_RazaoSocial',
-                'Valores_ValorServicos', 'Valores_ValorLiquidoNfse',
-                'Valores_ValorIss', 'Valores_IssRetido', 'Valores_Aliquota',
-                'Valores_ValorPis', 'Valores_ValorCofins', 'Valores_ValorIr', 'Valores_ValorCsll',
-                'IBS_Valor', 'CBS_Valor', 'IBS_Aliquota', 'CBS_Aliquota', 
-                'NBS', 'Cclass', 'ItemListaServico', 'Discriminacao'
+            # Seleção Inteligente: Pega colunas que CONTÉM essas palavras
+            keywords = [
+                'Numero', 'Data', 'Cnpj', 'RazaoSocial', 'Valor', 'Iss', 'Pis', 
+                'Cofins', 'Ir', 'Csll', 'Ibs', 'Cbs', 'Nbs', 'Cclass', 'Descricao', 'Chave'
             ]
             
-            # Garante que apenas as colunas que existem no XML apareçam
-            colunas_finais = [c for c in colunas_auditoria if c in df_total.columns]
-            df_final = df_total[colunas_finais]
-
-            st.success(f"Notas processadas para auditoria: {len(df_final)}")
+            cols_to_keep = ['Arquivo_Origem']
+            for col in df_total.columns:
+                if any(key.lower() in col.lower() for key in keywords):
+                    if col not in cols_to_keep:
+                        cols_to_keep.append(col)
             
-            # Preview rápido
+            # Se por acaso o filtro de keywords falhar, mostramos tudo para não virar "coluna única"
+            if len(cols_to_keep) < 5:
+                df_final = df_total
+            else:
+                df_final = df_total[cols_to_keep]
+
+            st.success(f"Concluído! {len(df_final)} notas processadas e {len(df_final.columns)} colunas identificadas.")
+            
+            st.write("### Preview da Auditoria")
             st.dataframe(df_final.head(10))
 
-            # Preparação do Excel
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                 df_final.to_excel(writer, index=False, sheet_name='Auditoria_Fiscal')
                 
-                # Ajuste automático de colunas no Excel
+                # Auto-ajuste de largura
                 workbook = writer.book
                 worksheet = writer.sheets['Auditoria_Fiscal']
                 for i, col in enumerate(df_final.columns):
                     column_len = max(df_final[col].astype(str).str.len().max(), len(col)) + 2
-                    worksheet.set_column(i, i, column_len)
+                    worksheet.set_column(i, i, min(column_len, 50)) # Limita a 50 para não esticar demais
 
             st.download_button(
-                label="📥 Baixar Planilha para Conferência",
+                label="📥 Baixar Excel Completo",
                 data=output.getvalue(),
-                file_name="conferencia_fiscal_servtax.xlsx",
+                file_name="portal_servtax_auditoria.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            st.warning("Nenhum dado XML foi encontrado nos arquivos enviados.")
+            st.warning("Nenhum dado encontrado.")
 
 if __name__ == "__main__":
     main()
