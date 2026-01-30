@@ -38,36 +38,31 @@ def flatten_dict(d, parent_key='', sep='_'):
 
 def simplify_and_filter(df):
     """
-    Filtra colunas com mapeamento expandido baseado em padrões reais (SP, Guarulhos, Nacional).
+    Filtra colunas com mapeamento reforçado para evitar 'None' nos dados principais.
     """
+    # Mapeamento cirúrgico para os campos que você apontou
     mapping = {
-        'Nota_Numero': ['numero', 'nfnr', 'numnf', 'nnfse', 'nrnotafiscal'],
-        'Data_Emissao': ['dataemissao', 'dtemic', 'dtrem', 'dtaemi', 'dh_emi'],
-        'Prestador_CNPJ': ['prestador_cnpj', 'prestador_cpfcnpj', 'prestador_identificacao', 'prestador_id'],
-        'Prestador_Razao': ['prestador_razãosocial', 'prestador_xnome', 'prestador_razão', 'prestador_nome'],
-        'Tomador_CNPJ': ['tomador_cnpj', 'tomador_cpfcnpj', 'tomador_identificacao', 'tomador_id'],
-        'Tomador_Razao': ['tomador_razãosocial', 'tomador_xnome', 'tomador_razão', 'tomador_nome'],
+        'Nota_Numero': ['numero', 'nfnr', 'nnfse', 'nrnotafiscal'],
+        'Data_Emissao': ['dataemissao', 'dtemic', 'dtrem', 'dh_emi', 'dtaemi', 'data_hora'],
+        
+        # Ajuste fino Prestador (Procura o bloco e o campo)
+        'Prestador_CNPJ': ['prestador_cnpj', 'prestador_cpfcnpj', 'prestador_cpf_cnpj', 'identificacaoprestador_cnpj'],
+        'Prestador_Razao': ['prestador_razãosocial', 'prestador_xnome', 'prestador_razão', 'prestador_nome', 'prestador_identificacao_nome'],
+        
+        # Ajuste fino Tomador
+        'Tomador_CNPJ': ['tomador_cnpj', 'tomador_cpfcnpj', 'tomador_cpf_cnpj', 'identificacaotomador_cnpj'],
+        'Tomador_Razao': ['tomador_razãosocial', 'tomador_xnome', 'tomador_razão', 'tomador_nome', 'tomador_identificacao_nome'],
+        
+        # Valores e Impostos
         'Vlr_Bruto': ['valorservicos', 'vserv', 'vlrserv', 'valorbruto', 'v_serv'],
-        'Vlr_Liquido': ['valorliquido', 'vliq', 'vlrliq', 'v_liq'],
-        # ISS
-        'ISS_Total': ['valoriss', 'viss', 'v_iss'],
         'ISS_Retido': ['issretido', 'vissret', 'iss_retido', 'v_iss_ret'],
-        # PIS
-        'PIS_Total': ['valorpis', 'vpis', 'v_pis'],
-        'PIS_Retido': ['pisretido', 'vpisret', 'v_pis_ret'],
-        # COFINS
-        'COFINS_Total': ['valorcofins', 'vcofins', 'v_cofins'],
-        'COFINS_Retido': ['cofinsretido', 'vcofinsret', 'v_cofins_ret'],
-        # IRRF
-        'IRRF_Retido': ['valorir', 'vir', 'irrf_retido', 'virrf', 'v_ir'],
-        # CSLL
-        'CSLL_Retido': ['valorcsll', 'vcsll', 'csll_retido', 'v_csll'],
-        # INSS
-        'INSS_Retido': ['valorinss', 'vinss', 'v_inss'],
-        # Reforma Tributária
-        'IBS': ['ibs_vlr', 'ibs_valor', 'v_ibs'],
-        'CBS': ['cbs_vlr', 'cbs_valor', 'v_cbs'],
-        'Servico_Descricao': ['discriminacao', 'xserv', 'infadic', 'desc_serv']
+        'PIS_Retido': ['pisretido', 'vpisret', 'pis_retido'],
+        'COFINS_Retido': ['cofinsretido', 'vcofinsret', 'cofins_retido'],
+        'IRRF_Retido': ['valorir', 'vir', 'irrf_retido', 'virrf'],
+        'CSLL_Retido': ['valorcsll', 'vcsll', 'csll_retido'],
+        
+        # Ajuste fino Descrição
+        'Servico_Descricao': ['discriminacao', 'xserv', 'infadic', 'desc_serv', 'servico_discriminacao']
     }
 
     final_df_data = {}
@@ -76,22 +71,29 @@ def simplify_and_filter(df):
 
     for friendly_name, radicals in mapping.items():
         found_col = None
-        # Procura a melhor coluna para o radical, evitando endereços
+        # Prioriza colunas que contêm o termo exato no final (mais precisão)
         for col in df.columns:
             col_lower = col.lower()
             if any(rad in col_lower for rad in radicals):
-                if not any(x in col_lower for x in ['endereco', 'logradouro', 'uf', 'cep', 'bairro', 'complemento']):
+                # Para CNPJ e Razão, verificamos se o radical casa com a origem (prestador/tomador)
+                if 'prestador' in friendly_name.lower() and 'tomador' in col_lower:
+                    continue
+                if 'tomador' in friendly_name.lower() and 'prestador' in col_lower:
+                    continue
+                
+                # Bloqueio de endereços
+                if not any(x in col_lower for x in ['endereco', 'logradouro', 'uf', 'cep', 'bairro']):
                     found_col = col
                     break
         
         if found_col:
-            # Converte para numérico se for valor de imposto
-            if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL', 'IBS', 'CBS', 'INSS']):
+            # Tratamento para valores numéricos
+            if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL']):
                 final_df_data[friendly_name] = pd.to_numeric(df[found_col], errors='coerce').fillna(0.0)
             else:
                 final_df_data[friendly_name] = df[found_col]
         else:
-            final_df_data[friendly_name] = 0.0 if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL', 'IBS', 'CBS', 'INSS']) else "Não encontrado"
+            final_df_data[friendly_name] = "Não localizado"
 
     return pd.DataFrame(final_df_data)
 
@@ -127,48 +129,42 @@ def process_files(uploaded_files):
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria Fiscal de Alta Precisão (Retidos e Totais)")
+    st.subheader("Auditoria Fiscal: Correção de Mapeamento de Dados")
 
     uploaded_files = st.file_uploader("Upload de XML ou ZIP", type=["xml", "zip"], accept_multiple_files=True)
 
     if uploaded_files:
-        with st.spinner('Realizando mapeamento profundo de tags...'):
+        with st.spinner('Refinando captura de CNPJ, Datas e Descrições...'):
             df_raw = process_files(uploaded_files)
         
         if not df_raw.empty:
             df_final = simplify_and_filter(df_raw)
 
-            st.success(f"Concluído: {len(df_final)} notas mapeadas.")
+            st.success(f"Notas processadas: {len(df_final)}")
             
-            st.write("### Conferência de Impostos")
+            st.write("### Conferência Detalhada")
             st.dataframe(df_final)
 
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                df_final.to_excel(writer, index=False, sheet_name='Auditoria_Fiscal')
+                df_final.to_excel(writer, index=False, sheet_name='Auditoria')
                 
                 workbook = writer.book
-                worksheet = writer.sheets['Auditoria_Fiscal']
-                
-                # Formatação de Dinheiro para as colunas de valores
-                money_fmt = workbook.add_format({'num_format': '#,##0.00'})
+                worksheet = writer.sheets['Auditoria']
                 header_fmt = workbook.add_format({'bold': True, 'bg_color': '#FF69B4', 'font_color': 'white'})
-
+                
                 for i, col in enumerate(df_final.columns):
                     worksheet.write(0, i, col, header_fmt)
-                    if any(x in col for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL', 'IBS', 'CBS', 'INSS']):
-                        worksheet.set_column(i, i, 15, money_fmt)
-                    else:
-                        worksheet.set_column(i, i, 25)
+                    worksheet.set_column(i, i, 20)
 
             st.download_button(
-                label="📥 Baixar Excel de Auditoria Completo",
+                label="📥 Baixar Excel Corrigido",
                 data=output.getvalue(),
-                file_name="auditoria_fiscal_completa.xlsx",
+                file_name="servtax_conferencia_fina.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            st.warning("Nenhum arquivo XML válido encontrado.")
+            st.warning("Nenhum dado encontrado.")
 
 if __name__ == "__main__":
     main()
