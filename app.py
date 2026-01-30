@@ -22,7 +22,7 @@ st.markdown("""
 def get_xml_value(root, tags):
     """
     Busca em Cascata com XPath: tenta cada tag da lista em qualquer nível do XML.
-    Ignora namespaces para garantir leitura universal.
+    Ignora namespaces para garantir leitura universal de centenas de prefeituras.
     """
     for tag in tags:
         element = root.find(f".//{{*}}{tag}")
@@ -31,40 +31,44 @@ def get_xml_value(root, tags):
         
         if element is not None and element.text:
             return element.text.strip()
-    return "0.00" if any(x in tag.lower() for x in ['vlr', 'valor', 'viss', 'vpis', 'vcofins', 'vir', 'vcsll', 'liquido']) else ""
+    return ""
 
 def process_xml_file(content, filename):
     try:
         tree = ET.parse(io.BytesIO(content))
         root = tree.getroot()
         
-        # MAPEAMENTO DE POSSIBILIDADES (Leitura direta dos campos das notas)
+        # MAPEAMENTO DE POSSIBILIDADES (O SEU MAPA COMPLETO)
         row = {
             'Arquivo': filename,
-            'Nota_Numero': get_xml_value(root, ['nNFSe', 'NumeroNFe', 'nNF', 'numero']),
-            'Data_Emissao': get_xml_value(root, ['dhProc', 'dhEmi', 'DataEmissaoNFe', 'DataEmissao']),
+            
+            # Número da Nota
+            'Nota_Numero': get_xml_value(root, ['nNFSe', 'NumeroNFe', 'nNF', 'numero', 'Numero']),
+            
+            # Data de Emissão
+            'Data_Emissao': get_xml_value(root, ['dhProc', 'dhEmi', 'DataEmissaoNFe', 'DataEmissao', 'dtEmi']),
             
             # PRESTADOR
-            'Prestador_CNPJ': get_xml_value(root, ['emit/CNPJ', 'CPFCNPJPrestador/CNPJ', 'CNPJPrestador', 'emit_CNPJ']),
+            'Prestador_CNPJ': get_xml_value(root, ['emit/CNPJ', 'CPFCNPJPrestador/CNPJ', 'CNPJPrestador', 'emit_CNPJ', 'CPFCNPJPrestador/CPF', 'CNPJ']),
             'Prestador_Razao': get_xml_value(root, ['emit/xNome', 'RazaoSocialPrestador', 'xNomePrestador', 'emit_xNome', 'RazaoSocial', 'xNome']),
             
             # TOMADOR
-            'Tomador_CNPJ': get_xml_value(root, ['toma/CNPJ', 'CPFCNPJTomador/CNPJ', 'CPFCNPJTomador/CPF', 'dest/CNPJ', 'CNPJTomador']),
-            'Tomador_Razao': get_xml_value(root, ['toma/xNome', 'RazaoSocialTomador', 'dest/xNome', 'xNomeTomador', 'RazaoSocialTomador']),
+            'Tomador_CNPJ': get_xml_value(root, ['toma/CNPJ', 'CPFCNPJTomador/CNPJ', 'CPFCNPJTomador/CPF', 'dest/CNPJ', 'CNPJTomador', 'toma/CPF', 'tom/CNPJ', 'CNPJ']),
+            'Tomador_Razao': get_xml_value(root, ['toma/xNome', 'RazaoSocialTomador', 'dest/xNome', 'xNomeTomador', 'RazaoSocialTomador', 'tom/xNome', 'xNome']),
             
-            # VALORES (Leitura direta das tags de totais)
+            # VALORES (Leitura Direta das Notas)
             'Vlr_Bruto': get_xml_value(root, ['vServ', 'ValorServicos', 'vNF', 'vServPrest/vServ', 'ValorTotal']),
             'Vlr_Liquido': get_xml_value(root, ['vLiq', 'ValorLiquidoNFe', 'vLiqNFSe', 'vLiquido', 'vServPrest/vLiq']),
             
-            # RETENÇÕES (Leitura direta das tags de impostos)
+            # RETENÇÕES (Leitura Direta das Notas)
             'Ret_ISS': get_xml_value(root, ['vISSRet', 'ValorISS', 'vISSQN', 'ValorISS_Retido', 'ISSRetido']),
             'Ret_PIS': get_xml_value(root, ['vPIS', 'ValorPIS', 'vPIS_Ret', 'PISRetido']),
             'Ret_COFINS': get_xml_value(root, ['vCOFINS', 'ValorCOFINS', 'vCOFINS_Ret', 'COFINSRetido']),
             'Ret_CSLL': get_xml_value(root, ['vCSLL', 'ValorCSLL', 'vCSLL_Ret', 'CSLLRetido']),
             'Ret_IRRF': get_xml_value(root, ['vIR', 'ValorIR', 'vIR_Ret', 'IRRetido']),
             
-            # Descrição
-            'Descricao': get_xml_value(root, ['CodigoServico', 'itemServico', 'cServ', 'xDescServ', 'Discriminacao'])
+            # Descrição (Código ou Descritivo)
+            'Descricao': get_xml_value(root, ['CodigoServico', 'itemServico', 'cServ', 'xDescServ', 'Discriminacao', 'xServ', 'infCpl', 'xProd'])
         }
         return row
     except:
@@ -72,7 +76,7 @@ def process_xml_file(content, filename):
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria Fiscal Multi-Prefeituras (Leitura Direta de Valores e Retenções)")
+    st.subheader("Auditoria Fiscal Multi-Prefeituras (Mapeamento Universal de Tags)")
 
     uploaded_files = st.file_uploader("Upload de XML ou ZIP", type=["xml", "zip"], accept_multiple_files=True)
 
@@ -92,7 +96,7 @@ def main():
         if data_rows:
             df = pd.DataFrame(data_rows)
             
-            # Conversão Numérica para garantir exibição correta no Excel
+            # Conversão financeira apenas para exibição
             cols_fin = ['Vlr_Bruto', 'Vlr_Liquido', 'Ret_ISS', 'Ret_PIS', 'Ret_COFINS', 'Ret_CSLL', 'Ret_IRRF']
             for col in cols_fin:
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
