@@ -37,20 +37,30 @@ def flatten_dict(d, parent_key='', sep='_'):
     return dict(items)
 
 def simplify_columns(df):
-    """Simplifica os nomes das colunas mantendo a integridade do DataFrame."""
-    new_columns = {}
+    """Simplifica os nomes das colunas evitando duplicidades que travam o Streamlit."""
+    new_col_names = []
+    seen_names = {}
+
     for col in df.columns:
-        if '_' in col:
-            parts = col.split('_')
-            # Tenta pegar o último termo
-            simple_name = parts[-1]
-            # Se for um nome muito comum ou curto, tenta pegar o pai + filho para evitar erro
-            if simple_name.lower() in ['valor', 'codigo', 'numero', 'data'] and len(parts) > 1:
-                simple_name = f"{parts[-2]}_{parts[-1]}"
-            new_columns[col] = simple_name
-        else:
-            new_columns[col] = col
-    return df.rename(columns=new_columns)
+        parts = col.split('_')
+        # Tenta o nome mais curto possível (último termo)
+        candidate = parts[-1]
+        
+        # Se o nome já foi usado, tenta adicionar o termo anterior (ex: Prestador_CpfCnpj)
+        if candidate in seen_names:
+            if len(parts) > 1:
+                candidate = f"{parts[-2]}_{parts[-1]}"
+            else:
+                # Se ainda assim for igual, coloca um sufixo numérico
+                count = seen_names.get(candidate, 0) + 1
+                candidate = f"{candidate}_{count}"
+        
+        # Registra o nome usado
+        seen_names[candidate] = seen_names.get(candidate, 0) + 1
+        new_col_names.append(candidate)
+        
+    df.columns = new_col_names
+    return df
 
 def extract_xml_from_zip(zip_data, extracted_list):
     with zipfile.ZipFile(io.BytesIO(zip_data)) as z:
@@ -89,7 +99,7 @@ def main():
     uploaded_files = st.file_uploader("Arraste seus XMLs ou ZIPs aqui", type=["xml", "zip"], accept_multiple_files=True)
 
     if uploaded_files:
-        with st.spinner('Extraindo dados...'):
+        with st.spinner('Extraindo dados e resolvendo nomes de colunas...'):
             df_total = process_files(uploaded_files)
         
         if not df_total.empty:
@@ -99,20 +109,19 @@ def main():
                 'Cofins', 'Ir', 'Csll', 'Ibs', 'Cbs', 'Nbs', 'Cclass', 'Descricao', 'Chave'
             ]
             
-            # Identifica quais colunas originais devem ser mantidas
             cols_to_keep = ['Arquivo_Origem']
             for col in df_total.columns:
                 if any(key.lower() in col.lower() for key in keywords):
                     if col not in cols_to_keep:
                         cols_to_keep.append(col)
             
-            # Filtra as colunas ORIGINAIS primeiro para evitar KeyError
+            # Filtra colunas originais
             df_filtrado = df_total[cols_to_keep] if len(cols_to_keep) > 5 else df_total
             
-            # AGORA sim simplifica os nomes das colunas para o usuário
+            # Resolve duplicidades e simplifica
             df_final = simplify_columns(df_filtrado)
 
-            st.success(f"Concluído! {len(df_final)} notas e {len(df_final.columns)} colunas identificadas.")
+            st.success(f"Concluído! {len(df_final)} notas processadas.")
             
             st.write("### Preview da Auditoria")
             st.dataframe(df_final.head(10))
@@ -128,9 +137,9 @@ def main():
                     worksheet.set_column(i, i, min(column_len, 40))
 
             st.download_button(
-                label="📥 Baixar Excel Simplificado",
+                label="📥 Baixar Excel Sem Duplicidades",
                 data=output.getvalue(),
-                file_name="portal_servtax_auditoria.xlsx",
+                file_name="portal_servtax_limpo.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
