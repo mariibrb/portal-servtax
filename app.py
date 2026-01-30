@@ -7,7 +7,7 @@ import zipfile
 # Configuração da Página
 st.set_page_config(page_title="Portal ServTax", layout="wide", page_icon="📑")
 
-# Estilo Rihanna (Rosa e Branco)
+# Estilo Rihanna
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&family=Plus+Jakarta+Sans:wght@400;700&display=swap');
@@ -39,27 +39,27 @@ def flatten_dict(d, parent_key='', sep='_'):
 
 def simplify_and_filter(df):
     """
-    Motor de Possibilidades: Se não encontrar a tag de SP, busca a Nacional.
-    Preenche a planilha linha a linha independente do município.
+    Motor de Equivalência: Se não encontrar a tag de SP, busca a Nacional.
+    Garante que todas as prefeituras apareçam linha a linha no Excel.
     """
     final_df_data = {}
     if 'Arquivo_Origem' in df.columns:
         final_df_data['Arquivo'] = df['Arquivo_Origem']
 
-    # MAPEAMENTO DE POSSIBILIDADES (Equivalências Técnicas para Coluna B, C, D...)
+    # MAPEAMENTO DE POSSIBILIDADES (SOMASES de Tags)
     mapping = {
         'Nota_Numero': ['nNFSe', 'NumeroNFe', 'nNF', 'numero'],
         'Data_Emissao': ['dhProc', 'DataEmissaoNFe', 'dhEmi', 'dataemissao', 'DataEmissao'],
         
-        # PRESTADOR (Busca tags de SP e do Bloco Nacional 'emit')
+        # PRESTADOR
         'Prestador_CNPJ': ['emit_CNPJ', 'CPFCNPJPrestador_CNPJ', 'CNPJPrestador', 'emit_CPF'],
         'Prestador_Razao': ['emit_xNome', 'RazaoSocialPrestador', 'xNomePrestador', 'emit_razao'],
         
-        # TOMADOR (Busca tags de SP e do Bloco Nacional 'toma')
+        # TOMADOR
         'Tomador_CNPJ': ['toma_CNPJ', 'CPFCNPJTomador_CNPJ', 'CPFCNPJTomador_CPF', 'toma_CPF', 'dest_CNPJ'],
         'Tomador_Razao': ['toma_xNome', 'RazaoSocialTomador', 'dest_xNome', 'xNomeTomador'],
         
-        # VALORES (vServ no Nacional / ValorServicos em SP)
+        # VALORES
         'Vlr_Bruto': ['vServ', 'ValorServicos', 'vNF', 'v_serv', 'vServPrest_vServ'],
         
         # IMPOSTOS
@@ -69,21 +69,21 @@ def simplify_and_filter(df):
         'IRRF_Retido': ['vIR', 'ValorIR', 'ir_retido'],
         'CSLL_Retido': ['vCSLL', 'ValorCSLL', 'csll_retido'],
         
-        # DESCRIÇÃO (xDescServ no Nacional / Discriminacao em SP)
+        # DESCRIÇÃO
         'Servico_Descricao': ['xDescServ', 'Discriminacao', 'xServ', 'infCpl', 'xProd']
     }
 
     for friendly_name, tags in mapping.items():
         found_series = None
         for col in df.columns:
-            # Verifica se o final da coluna bate com alguma das tags técnicas (ignora maiúsculas)
+            # Verifica se o final da coluna bate com alguma das tags (ignora maiúsculas)
             if any(col.lower().endswith(t.lower()) for t in tags):
-                # Proteção para não misturar Prestador com Tomador
+                # Filtro de Contexto (Evita misturar Prestador com Tomador)
                 if 'Prestador' in friendly_name and ('tomador' in col.lower() or 'toma' in col.lower() or 'dest' in col.lower()): continue
                 if 'Tomador' in friendly_name and ('prestador' in col.lower() or 'emit' in col.lower()): continue
                 
-                current_series = df[col]
                 # Só preenche se encontrar dados reais
+                current_series = df[col]
                 if found_series is None or (isinstance(found_series, pd.Series) and found_series.isnull().all()):
                     found_series = current_series
 
@@ -91,9 +91,9 @@ def simplify_and_filter(df):
             if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL']):
                 final_df_data[friendly_name] = pd.to_numeric(found_series, errors='coerce').fillna(0.0)
             else:
-                final_df_data[friendly_name] = found_series.fillna("Não Identificado")
+                final_df_data[friendly_name] = found_series.fillna("N/A")
         else:
-            final_df_data[friendly_name] = 0.0 if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL']) else "NÃO LOCALIZADO"
+            final_df_data[friendly_name] = 0.0 if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL']) else "N/A"
 
     return pd.DataFrame(final_df_data)
 
@@ -110,38 +110,35 @@ def extract_xml_from_zip(zip_data, extracted_list):
     except: pass
 
 def process_files(uploaded_files):
-    all_extracted_data = []
+    all_data = []
     for uploaded_file in uploaded_files:
         content = uploaded_file.read()
         if uploaded_file.name.lower().endswith('.xml'):
-            all_extracted_data.append({'name': uploaded_file.name, 'content': content})
+            all_data.append({'name': uploaded_file.name, 'content': content})
         elif uploaded_file.name.lower().endswith('.zip'):
-            extract_xml_from_zip(content, all_extracted_data)
+            extract_xml_from_zip(content, all_data)
             
     final_rows = []
-    for item in all_extracted_data:
+    for item in all_data:
         try:
             data_dict = xmltodict.parse(item['content'])
-            if isinstance(data_dict, list):
-                for sub_item in data_dict:
-                    flat = flatten_dict(sub_item)
-                    flat['Arquivo_Origem'] = item['name']
-                    final_rows.append(flat)
-            else:
-                flat_data = flatten_dict(data_dict)
-                flat_data['Arquivo_Origem'] = item['name']
-                final_rows.append(flat_data)
+            # Normalização: ignora o nó raiz para unificar nomes de colunas
+            if isinstance(data_dict, dict):
+                root = list(data_dict.keys())[0]
+                flat = flatten_dict(data_dict[root])
+                flat['Arquivo_Origem'] = item['name']
+                final_rows.append(flat)
         except: continue
     return pd.DataFrame(final_rows)
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria Fiscal: Mapeamento de Todos os Municípios")
+    st.subheader("Auditoria Fiscal: Mapeamento São Paulo & Nacional")
 
     uploaded_files = st.file_uploader("Upload de XML ou ZIP", type=["xml", "zip"], accept_multiple_files=True)
 
     if uploaded_files:
-        with st.spinner('Consolidando layouts SP e Nacional...'):
+        with st.spinner('Unificando todos os layouts no Excel...'):
             df_raw = process_files(uploaded_files)
         
         if not df_raw.empty:
@@ -167,7 +164,7 @@ def main():
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            st.warning("Nenhum dado encontrado nos arquivos.")
+            st.warning("Nenhum dado encontrado.")
 
 if __name__ == "__main__":
     main()
