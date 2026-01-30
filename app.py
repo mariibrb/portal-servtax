@@ -7,7 +7,7 @@ import zipfile
 # Configuração da Página
 st.set_page_config(page_title="Portal ServTax", layout="wide", page_icon="📑")
 
-# Estilo Rihanna
+# Estilo Rihanna (Rosa e Branco)
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&family=Plus+Jakarta+Sans:wght@400;700&display=swap');
@@ -22,6 +22,7 @@ st.markdown("""
 def get_xml_value(root, tags):
     """
     Busca em Cascata com XPath: tenta cada tag da lista em qualquer nível do XML.
+    Ignora namespaces para garantir leitura de centenas de prefeituras.
     """
     for tag in tags:
         # O prefixo .// permite encontrar a tag em qualquer profundidade
@@ -39,12 +40,11 @@ def process_xml_file(content, filename):
         tree = ET.parse(io.BytesIO(content))
         root = tree.getroot()
         
-        # MAPEAMENTO DE POSSIBILIDADES (Cascata de Tags para centenas de prefeituras)
+        # MAPEAMENTO DE POSSIBILIDADES (Cascata de Tags para leitura linha a linha)
         row = {
             'Arquivo': filename,
-            'Municipio': get_xml_value(root, ['xLocEmi', 'NomeCidade', 'Cidade', 'xMun']),
             
-            # Número da Nota
+            # Número da Nota (Coluna B no Excel)
             'Nota_Numero': get_xml_value(root, ['nNFSe', 'NumeroNFe', 'nNF', 'numero', 'Numero']),
             
             # Data de Emissão
@@ -75,7 +75,7 @@ def process_xml_file(content, filename):
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria Fiscal Multi-Prefeituras (Motor de Busca em Cascata)")
+    st.subheader("Auditoria Fiscal Multi-Prefeituras (Mapeamento Universal de Tags)")
 
     uploaded_files = st.file_uploader("Upload de XML ou ZIP", type=["xml", "zip"], accept_multiple_files=True)
 
@@ -95,12 +95,14 @@ def main():
         if data_rows:
             df = pd.DataFrame(data_rows)
             
-            # Conversão de valores financeiros para Excel
+            # Conversão de valores financeiros para processamento no Excel
             cols_fin = ['Vlr_Bruto', 'ISS_Retido', 'PIS', 'COFINS']
             for col in cols_fin:
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
 
             st.success(f"Notas processadas com sucesso: {len(df)}")
+            
+            # Exibição na tela (sem a coluna de Município)
             st.dataframe(df)
 
             output = io.BytesIO()
@@ -109,6 +111,7 @@ def main():
                 workbook = writer.book
                 worksheet = writer.sheets['PortalServTax']
                 header_fmt = workbook.add_format({'bold': True, 'bg_color': '#FF69B4', 'font_color': 'white', 'border': 1})
+                
                 for i, col in enumerate(df.columns):
                     worksheet.write(0, i, col, header_fmt)
                     worksheet.set_column(i, i, 22)
