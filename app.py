@@ -37,7 +37,7 @@ def process_xml_file(content, filename):
         tree = ET.parse(io.BytesIO(content))
         root = tree.getroot()
         
-        # MAPEAMENTO DE POSSIBILIDADES (Blindagem de ISS Retido)
+        # MAPEAMENTO DE POSSIBILIDADES (Separação Rigorosa de ISS Próprio vs Retido)
         row = {
             'Arquivo': filename,
             'Nota_Numero': get_xml_value(root, ['nNFSe', 'NumeroNFe', 'nNF', 'numero', 'Numero']),
@@ -55,10 +55,10 @@ def process_xml_file(content, filename):
             'Vlr_Bruto': get_xml_value(root, ['vServ', 'ValorServicos', 'vNF', 'vServPrest/vServ', 'ValorTotal']),
             'Vlr_Liquido': get_xml_value(root, ['vLiq', 'ValorLiquidoNFe', 'vLiqNFSe', 'vLiquido', 'vServPrest/vLiq']),
             
-            # ISS PRÓPRIO (Focado em tags de débito do prestador)
+            # ISS PRÓPRIO (Apenas tags de débito do prestador)
             'ISS_Valor': get_xml_value(root, ['vISS', 'ValorISS', 'vISSQN', 'iss/vISS']),
             
-            # ISS RETIDO (Blindado para não pegar vISS do prestador)
+            # ISS RETIDO (Blindado: removido ValorISS daqui para não misturar)
             'Ret_ISS': get_xml_value(root, ['vTotTribMun', 'vISSRet', 'ValorISS_Retido', 'ISSRetido', 'vISSRetido', 'vRetISS', 'iss/vRet']),
             
             # DEMAIS RETENÇÕES (Leitura Direta)
@@ -76,7 +76,7 @@ def process_xml_file(content, filename):
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria Fiscal: Blindagem de ISS Próprio vs Retido")
+    st.subheader("Auditoria Fiscal: Blindagem entre ISS Próprio e Retido")
 
     uploaded_files = st.file_uploader("Upload de XML ou ZIP", type=["xml", "zip"], accept_multiple_files=True)
 
