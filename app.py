@@ -38,7 +38,7 @@ def process_xml_file(content, filename):
         tree = ET.parse(io.BytesIO(content))
         root = tree.getroot()
         
-        # MAPEAMENTO DE POSSIBILIDADES (Incluindo vTotTribMun conforme solicitado)
+        # MAPEAMENTO DE POSSIBILIDADES (ISS Próprio e Retido Totalmente Separados)
         row = {
             'Arquivo': filename,
             'Nota_Numero': get_xml_value(root, ['nNFSe', 'NumeroNFe', 'nNF', 'numero', 'Numero']),
@@ -56,9 +56,11 @@ def process_xml_file(content, filename):
             'Vlr_Bruto': get_xml_value(root, ['vServ', 'ValorServicos', 'vNF', 'vServPrest/vServ', 'ValorTotal']),
             'Vlr_Liquido': get_xml_value(root, ['vLiq', 'ValorLiquidoNFe', 'vLiqNFSe', 'vLiquido', 'vServPrest/vLiq']),
             
-            # ISS (Próprio e Retido - Incluindo vTotTribMun)
-            'ISS_Valor': get_xml_value(root, ['vISS', 'ValorISS', 'vISSQN', 'iss/vISS', 'vTotTribMun']),
-            'Ret_ISS': get_xml_value(root, ['vISSRet', 'ValorISS_Retido', 'ISSRetido', 'vISSRetido', 'vRetISS', 'vTotTribMun', 'iss/vRet']),
+            # ISS PRÓPRIO (Apenas tags de imposto devido/apurado)
+            'ISS_Valor': get_xml_value(root, ['vISS', 'ValorISS', 'vISSQN', 'iss/vISS']),
+            
+            # ISS RETIDO (Apenas tags de retenção na fonte)
+            'Ret_ISS': get_xml_value(root, ['vISSRet', 'vTotTribMun', 'ValorISS_Retido', 'ISSRetido', 'vISSRetido', 'vRetISS', 'iss/vRet']),
             
             # DEMAIS RETENÇÕES (Leitura Direta)
             'Ret_PIS': get_xml_value(root, ['vPIS', 'ValorPIS', 'vPIS_Ret', 'PISRetido']),
@@ -75,7 +77,7 @@ def process_xml_file(content, filename):
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria Fiscal Multi-Prefeituras (Mapeamento Universal de Tags)")
+    st.subheader("Auditoria Fiscal: Separação Rigorosa de ISS Próprio e Retido")
 
     uploaded_files = st.file_uploader("Upload de XML ou ZIP", type=["xml", "zip"], accept_multiple_files=True)
 
