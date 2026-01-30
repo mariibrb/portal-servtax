@@ -22,7 +22,7 @@ st.markdown("""
 def get_xml_value(root, tags):
     """
     Busca em Cascata com XPath: tenta cada tag da lista em qualquer nível do XML.
-    Ignora namespaces para garantir leitura universal de centenas de prefeituras.
+    Ignora namespaces para garantir leitura universal.
     """
     for tag in tags:
         element = root.find(f".//{{*}}{tag}")
@@ -31,7 +31,7 @@ def get_xml_value(root, tags):
         
         if element is not None and element.text:
             return element.text.strip()
-    return ""
+    return "0" if any(x in tag.lower() for x in ['vlr', 'valor', 'viss', 'vpis', 'vcofins', 'vir', 'vcsll']) else ""
 
 def process_xml_file(content, filename):
     try:
@@ -41,11 +41,7 @@ def process_xml_file(content, filename):
         # MAPEAMENTO DE POSSIBILIDADES
         row = {
             'Arquivo': filename,
-            
-            # Número da Nota
             'Nota_Numero': get_xml_value(root, ['nNFSe', 'NumeroNFe', 'nNF', 'numero', 'Numero']),
-            
-            # Data de Emissão
             'Data_Emissao': get_xml_value(root, ['dhProc', 'dhEmi', 'DataEmissaoNFe', 'DataEmissao', 'dtEmi']),
             
             # PRESTADOR
@@ -56,11 +52,17 @@ def process_xml_file(content, filename):
             'Tomador_CNPJ': get_xml_value(root, ['toma/CNPJ', 'CPFCNPJTomador/CNPJ', 'CPFCNPJTomador/CPF', 'dest/CNPJ', 'CNPJTomador', 'toma/CPF', 'tom/CNPJ', 'CNPJ']),
             'Tomador_Razao': get_xml_value(root, ['toma/xNome', 'RazaoSocialTomador', 'dest/xNome', 'xNomeTomador', 'RazaoSocialTomador', 'tom/xNome', 'xNome']),
             
-            # Valores e Impostos
+            # VALORES BRUTOS
             'Vlr_Bruto': get_xml_value(root, ['vServ', 'ValorServicos', 'vNF', 'vServPrest/vServ', 'ValorTotal']),
-            'ISS_Retido': get_xml_value(root, ['vISSRet', 'ValorISS', 'vISSQN', 'ValorISS_Retido', 'ISSRetido']),
             
-            # Descrição (ALTERAÇÃO SOLICITADA: Busca código de serviço ou descrição)
+            # RETENÇÕES (Onde o mapeamento costuma falhar, agora reforçado)
+            'Ret_ISS': get_xml_value(root, ['vISSRet', 'ValorISS', 'vISSQN', 'ValorISS_Retido', 'ISSRetido']),
+            'Ret_PIS': get_xml_value(root, ['vPIS', 'ValorPIS', 'vPIS_Ret', 'PISRetido', 'pis/vRet']),
+            'Ret_COFINS': get_xml_value(root, ['vCOFINS', 'ValorCOFINS', 'vCOFINS_Ret', 'COFINSRetido', 'cofins/vRet']),
+            'Ret_CSLL': get_xml_value(root, ['vCSLL', 'ValorCSLL', 'vCSLL_Ret', 'CSLLRetido', 'csll/vRet']),
+            'Ret_IRRF': get_xml_value(root, ['vIR', 'ValorIR', 'vIR_Ret', 'IRRetido', 'irrf/vRet']),
+            
+            # Descrição
             'Descricao': get_xml_value(root, ['CodigoServico', 'itemServico', 'cServ', 'xDescServ', 'Discriminacao', 'xServ', 'infCpl'])
         }
         return row
@@ -69,7 +71,7 @@ def process_xml_file(content, filename):
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria Fiscal Multi-Prefeituras (Mapeamento Universal de Tags)")
+    st.subheader("Auditoria Fiscal Multi-Prefeituras (Mapeamento de Retenções e Valor Líquido)")
 
     uploaded_files = st.file_uploader("Upload de XML ou ZIP", type=["xml", "zip"], accept_multiple_files=True)
 
@@ -89,29 +91,46 @@ def main():
         if data_rows:
             df = pd.DataFrame(data_rows)
             
-            # Conversão de valores financeiros
-            cols_fin = ['Vlr_Bruto', 'ISS_Retido']
-            for col in cols_fin:
+            # Conversão Numérica Rigorosa para cálculos
+            cols_financeiras = ['Vlr_Bruto', 'Ret_ISS', 'Ret_PIS', 'Ret_COFINS', 'Ret_CSLL', 'Ret_IRRF']
+            for col in cols_financeiras:
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
+
+            # CÁLCULO DO VALOR LÍQUIDO
+            # Líquido = Bruto - (Soma de todas as retenções capturadas)
+            df['Vlr_Liquido'] = df['Vlr_Bruto'] - (df['Ret_ISS'] + df['Ret_PIS'] + df['Ret_COFINS'] + df['Ret_CSLL'] + df['Ret_IRRF'])
+
+            # Reordenar colunas para que os totais fiquem visíveis
+            cols = list(df.columns)
+            # Move Vlr_Liquido para perto de Vlr_Bruto
+            if 'Vlr_Liquido' in cols:
+                cols.insert(cols.index('Vlr_Bruto') + 1, cols.pop(cols.index('Vlr_Liquido')))
+            df = df[cols]
 
             st.success(f"Notas processadas com sucesso: {len(df)}")
             st.dataframe(df)
 
+            # Exportação Excel com formatação
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                 df.to_excel(writer, index=False, sheet_name='PortalServTax')
                 workbook = writer.book
                 worksheet = writer.sheets['PortalServTax']
+                
                 header_fmt = workbook.add_format({'bold': True, 'bg_color': '#FF69B4', 'font_color': 'white', 'border': 1})
+                num_fmt = workbook.add_format({'num_format': '#,##0.00'})
                 
                 for i, col in enumerate(df.columns):
                     worksheet.write(0, i, col, header_fmt)
-                    worksheet.set_column(i, i, 22)
+                    if col in cols_financeiras or col == 'Vlr_Liquido':
+                        worksheet.set_column(i, i, 15, num_fmt)
+                    else:
+                        worksheet.set_column(i, i, 22)
 
             st.download_button(
-                label="📥 Baixar Planilha de Auditoria",
+                label="📥 Baixar Planilha de Auditoria com Totais",
                 data=output.getvalue(),
-                file_name="portal_servtax_auditoria.xlsx",
+                file_name="portal_servtax_auditoria_financeira.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
