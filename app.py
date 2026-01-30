@@ -36,31 +36,56 @@ def flatten_dict(d, parent_key='', sep='_'):
             items.append((new_key, v))
     return dict(items)
 
-def simplify_columns(df):
-    """Simplifica os nomes das colunas evitando duplicidades que travam o Streamlit."""
-    new_col_names = []
-    seen_names = {}
+def simplify_and_filter(df):
+    """
+    Filtra apenas as colunas essenciais de auditoria e simplifica os nomes
+    evitando tags de endereço e burocracias.
+    """
+    # 1. Mapeamento de tags essenciais (Alvos principais)
+    targets = {
+        'Numero': 'Nota_Numero',
+        'DataEmissao': 'Data_Emissao',
+        'CpfCnpj': 'CNPJ', # Será tratado para Prestador/Tomador
+        'RazaoSocial': 'Razao_Social',
+        'ValorServicos': 'Vlr_Bruto',
+        'ValorLiquido': 'Vlr_Liquido',
+        'ValorIss': 'ISS',
+        'ValorPis': 'PIS',
+        'ValorCofins': 'COFINS',
+        'ValorIr': 'IRRF',
+        'ValorCsll': 'CSLL',
+        'OutrasRetencoes': 'Outras_Ret',
+        'IBS_Valor': 'IBS',
+        'CBS_Valor': 'CBS',
+        'NBS': 'NBS',
+        'Cclass': 'Cclass',
+        'Discriminacao': 'Servico_Descricao'
+    }
 
-    for col in df.columns:
-        parts = col.split('_')
-        # Tenta o nome mais curto possível (último termo)
-        candidate = parts[-1]
-        
-        # Se o nome já foi usado, tenta adicionar o termo anterior (ex: Prestador_CpfCnpj)
-        if candidate in seen_names:
-            if len(parts) > 1:
-                candidate = f"{parts[-2]}_{parts[-1]}"
-            else:
-                # Se ainda assim for igual, coloca um sufixo numérico
-                count = seen_names.get(candidate, 0) + 1
-                candidate = f"{candidate}_{count}"
-        
-        # Registra o nome usado
-        seen_names[candidate] = seen_names.get(candidate, 0) + 1
-        new_col_names.append(candidate)
-        
-    df.columns = new_col_names
-    return df
+    final_data = {}
+    cols = df.columns
+    
+    # Sempre incluir a origem
+    if 'Arquivo_Origem' in cols:
+        final_data['Arquivo'] = df['Arquivo_Origem']
+
+    for orig_col in cols:
+        for tag, simple_name in targets.items():
+            if tag.lower() in orig_col.lower():
+                # Bloqueio de endereços e IBGE
+                if any(x in orig_col.lower() for x in ['endereco', 'logradouro', 'complemento', 'bairro', 'ibge', 'uf', 'cep']):
+                    continue
+                
+                # Identifica se é Prestador ou Tomador para o CNPJ e Razão
+                name = simple_name
+                if 'prestador' in orig_col.lower():
+                    name = f"Prestador_{simple_name}"
+                elif 'tomador' in orig_col.lower():
+                    name = f"Tomador_{simple_name}"
+                
+                final_data[name] = df[orig_col]
+
+    return pd.DataFrame(final_data)
 
 def extract_xml_from_zip(zip_data, extracted_list):
     with zipfile.ZipFile(io.BytesIO(zip_data)) as z:
@@ -94,56 +119,41 @@ def process_files(uploaded_files):
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria Fiscal de NFS-e (Consolidado)")
+    st.subheader("Auditoria Fiscal Direta (Sem Burocracia)")
 
     uploaded_files = st.file_uploader("Arraste seus XMLs ou ZIPs aqui", type=["xml", "zip"], accept_multiple_files=True)
 
     if uploaded_files:
-        with st.spinner('Extraindo dados e resolvendo nomes de colunas...'):
-            df_total = process_files(uploaded_files)
+        with st.spinner('Filtrando apenas o essencial...'):
+            df_raw = process_files(uploaded_files)
         
-        if not df_total.empty:
-            # Palavras-chave para auditoria
-            keywords = [
-                'Numero', 'Data', 'Cnpj', 'RazaoSocial', 'Valor', 'Iss', 'Pis', 
-                'Cofins', 'Ir', 'Csll', 'Ibs', 'Cbs', 'Nbs', 'Cclass', 'Descricao', 'Chave'
-            ]
-            
-            cols_to_keep = ['Arquivo_Origem']
-            for col in df_total.columns:
-                if any(key.lower() in col.lower() for key in keywords):
-                    if col not in cols_to_keep:
-                        cols_to_keep.append(col)
-            
-            # Filtra colunas originais
-            df_filtrado = df_total[cols_to_keep] if len(cols_to_keep) > 5 else df_total
-            
-            # Resolve duplicidades e simplifica
-            df_final = simplify_columns(df_filtrado)
+        if not df_raw.empty:
+            # Aplica o filtro rígido de colunas
+            df_final = simplify_and_filter(df_raw)
 
-            st.success(f"Concluído! {len(df_final)} notas processadas.")
+            st.success(f"Notas processadas: {len(df_final)}. Colunas reduzidas para o essencial.")
             
-            st.write("### Preview da Auditoria")
-            st.dataframe(df_final.head(10))
+            st.write("### Tabela de Conferência")
+            st.dataframe(df_final)
 
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                df_final.to_excel(writer, index=False, sheet_name='Auditoria_Fiscal')
+                df_final.to_excel(writer, index=False, sheet_name='Auditoria_Limpa')
                 
                 workbook = writer.book
-                worksheet = writer.sheets['Auditoria_Fiscal']
+                worksheet = writer.sheets['Auditoria_Limpa']
                 for i, col in enumerate(df_final.columns):
                     column_len = max(df_final[col].astype(str).str.len().max(), len(col)) + 2
-                    worksheet.set_column(i, i, min(column_len, 40))
+                    worksheet.set_column(i, i, min(column_len, 50))
 
             st.download_button(
-                label="📥 Baixar Excel Sem Duplicidades",
+                label="📥 Baixar Excel de Auditoria",
                 data=output.getvalue(),
-                file_name="portal_servtax_limpo.xlsx",
+                file_name="auditoria_servtax_objetivo.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            st.warning("Nenhum XML válido encontrado.")
+            st.warning("Nenhum dado válido encontrado.")
 
 if __name__ == "__main__":
     main()
