@@ -7,7 +7,7 @@ import zipfile
 # Configuração da Página
 st.set_page_config(page_title="Portal ServTax", layout="wide", page_icon="📑")
 
-# Estilo Rihanna
+# Estilo Rihanna (Rosa e Branco)
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&family=Plus+Jakarta+Sans:wght@400;700&display=swap');
@@ -39,59 +39,58 @@ def flatten_dict(d, parent_key='', sep='_'):
 
 def simplify_and_filter(df):
     """
-    Motor de Busca Profunda: Varre todas as combinações possíveis de nomes de colunas
-    para garantir que os dados de SP e Nacional sejam unificados.
+    Motor de Busca por Intersecção: Identifica o dado se as palavras-chave 
+    estiverem presentes em qualquer parte do nome da coluna.
     """
     final_df_data = {}
     if 'Arquivo_Origem' in df.columns:
         final_df_data['Arquivo'] = df['Arquivo_Origem']
 
-    # Regras de Captura: O que a coluna DEVE ter e o que NÃO PODE ter
+    # Regras de captura baseadas nos ficheiros enviados (SP e Nacional)
     rules = {
-        'Nota_Numero': {'must': [['numero', 'nfe'], ['nnfse'], ['nnf']], 'not': []},
-        'Data_Emissao': {'must': [['data', 'emissao'], ['dhproc'], ['dhemi']], 'not': []},
+        'Nota_Numero': [['numero', 'nfe'], ['nnfse'], ['nnf']],
+        'Data_Emissao': [['data', 'emissao'], ['dhproc'], ['dhemi'], ['datahora']],
         
-        'Prestador_CNPJ': {'must': [['prestador', 'cnpj'], ['emit', 'cnpj'], ['prestador', 'cpf']], 'not': ['tomador', 'dest']},
-        'Prestador_Razao': {'must': [['prestador', 'razao'], ['emit', 'xnome'], ['prestador', 'nome']], 'not': ['tomador', 'dest']},
+        'Prestador_CNPJ': [['prestador', 'cnpj'], ['emit', 'cnpj'], ['prestador', 'cpf']],
+        'Prestador_Razao': [['prestador', 'razao'], ['emit', 'xnome'], ['prestador', 'nome']],
         
-        'Tomador_CNPJ': {'must': [['tomador', 'cnpj'], ['toma', 'cnpj'], ['dest', 'cnpj'], ['tomador', 'cpf']], 'not': ['prestador', 'emit']},
-        'Tomador_Razao': {'must': [['tomador', 'razao'], ['toma', 'xnome'], ['dest', 'xnome'], ['tomador', 'nome']], 'not': ['prestador', 'emit']},
+        'Tomador_CNPJ': [['tomador', 'cnpj'], ['toma', 'cnpj'], ['dest', 'cnpj'], ['tomador', 'cpf']],
+        'Tomador_Razao': [['tomador', 'razao'], ['toma', 'xnome'], ['dest', 'xnome'], ['tomador', 'nome']],
         
-        'Vlr_Bruto': {'must': [['valorservicos'], ['vserv'], ['valorbruto'], ['vlrbruto'], ['vnf']], 'not': ['retido']},
+        'Vlr_Bruto': [['valorservicos'], ['vserv'], ['valorbruto'], ['vlrbruto'], ['vnf']],
         
-        'ISS_Retido': {'must': [['iss', 'retido'], ['vissret'], ['valoriss']], 'not': []},
-        'PIS_Retido': {'must': [['pis', 'retido'], ['vpis'], ['valorpis']], 'not': []},
-        'COFINS_Retido': {'must': [['cofins', 'retido'], ['vcofins'], ['valorcofins']], 'not': []},
-        'IRRF_Retido': {'must': [['ir', 'retido'], ['vir'], ['valorir'], ['virrf']], 'not': []},
-        'CSLL_Retido': {'must': [['csll', 'retido'], ['vcsll'], ['valorcsll']], 'not': []},
+        'ISS_Retido': [['iss', 'retido'], ['vissret'], ['valoriss']],
+        'PIS_Retido': [['pis', 'retido'], ['vpis'], ['valorpis']],
+        'COFINS_Retido': [['cofins', 'retido'], ['vcofins'], ['valorcofins']],
+        'IRRF_Retido': [['ir', 'retido'], ['vir'], ['valorir'], ['virrf']],
+        'CSLL_Retido': [['csll', 'retido'], ['vcsll'], ['valorcsll']],
         
-        'Servico_Descricao': {'must': [['discriminacao'], ['xdescserv'], ['xserv'], ['infcpl'], ['xprod']], 'not': []}
+        'Servico_Descricao': [['discriminacao'], ['xdescserv'], ['xserv'], ['infcpl'], ['xprod'], ['detalhe']]
     }
 
-    for friendly_name, condition in rules.items():
+    for friendly_name, condition_groups in rules.items():
         found_series = None
         for col in df.columns:
             c_low = col.lower()
             
-            # Verifica se a coluna atende a um dos grupos de "must"
-            match_must = False
-            for group in condition['must']:
+            # Se a coluna tiver TODAS as palavras de um dos grupos, é o que procuramos
+            for group in condition_groups:
                 if all(word in c_low for word in group):
-                    match_must = True
-                    break
-            
-            if match_must:
-                # Verifica se a coluna NÃO contém palavras proibidas
-                if not any(word in c_low for word in condition['not']):
-                    # Se achou uma coluna que não está vazia, fixa ela
+                    # Filtro de segurança: não misturar Prestador com Tomador
+                    if 'prestador' in friendly_name.lower() and ('tomador' in c_low or 'toma' in c_low or 'dest' in c_low):
+                        continue
+                    if 'tomador' in friendly_name.lower() and ('prestador' in c_low or 'emit' in c_low):
+                        continue
+                    
                     if found_series is None or (isinstance(found_series, pd.Series) and found_series.isnull().all()):
                         found_series = df[col]
+                        break
 
         if found_series is not None:
             if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL']):
                 final_df_data[friendly_name] = pd.to_numeric(found_series, errors='coerce').fillna(0.0)
             else:
-                final_df_data[friendly_name] = found_series.fillna("Não Identificado")
+                final_df_data[friendly_name] = found_series.fillna("Dado Ausente")
         else:
             final_df_data[friendly_name] = 0.0 if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL']) else "NÃO LOCALIZADO"
 
@@ -110,16 +109,16 @@ def extract_xml_from_zip(zip_data, extracted_list):
     except: pass
 
 def process_files(uploaded_files):
-    all_data = []
+    all_extracted_data = []
     for uploaded_file in uploaded_files:
         content = uploaded_file.read()
         if uploaded_file.name.lower().endswith('.xml'):
-            all_data.append({'name': uploaded_file.name, 'content': content})
+            all_extracted_data.append({'name': uploaded_file.name, 'content': content})
         elif uploaded_file.name.lower().endswith('.zip'):
-            extract_xml_from_zip(content, all_data)
+            extract_xml_from_zip(content, all_extracted_data)
             
     final_rows = []
-    for item in all_data:
+    for item in all_extracted_data:
         try:
             data_dict = xmltodict.parse(item['content'])
             if isinstance(data_dict, list):
@@ -136,18 +135,18 @@ def process_files(uploaded_files):
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria Fiscal Total: SP & Nacional")
+    st.subheader("Auditoria Fiscal: Motor Unificado SP & Nacional")
 
     uploaded_files = st.file_uploader("Upload de XML ou ZIP", type=["xml", "zip"], accept_multiple_files=True)
 
     if uploaded_files:
-        with st.spinner('Consolidando dados...'):
+        with st.spinner('A processar notas de diferentes prefeituras...'):
             df_raw = process_files(uploaded_files)
         
         if not df_raw.empty:
             df_final = simplify_and_filter(df_raw)
 
-            st.success(f"Processadas: {len(df_final)} notas.")
+            st.success(f"Concluído! {len(df_final)} notas processadas.")
             st.dataframe(df_final)
 
             output = io.BytesIO()
@@ -167,7 +166,7 @@ def main():
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            st.warning("Nenhum dado encontrado.")
+            st.warning("Nenhum dado válido encontrado.")
 
 if __name__ == "__main__":
     main()
