@@ -38,62 +38,57 @@ def flatten_dict(d, parent_key='', sep='_'):
 
 def simplify_and_filter(df):
     """
-    Filtra colunas com mapeamento reforçado para evitar 'None' nos dados principais.
+    Filtro de busca profunda: varre o DataFrame procurando padrões de fim de tag (sufixos)
+    para garantir que nenhum campo essencial fique como None.
     """
-    # Mapeamento cirúrgico para os campos que você apontou
-    mapping = {
-        'Nota_Numero': ['numero', 'nfnr', 'nnfse', 'nrnotafiscal'],
-        'Data_Emissao': ['dataemissao', 'dtemic', 'dtrem', 'dh_emi', 'dtaemi', 'data_hora'],
-        
-        # Ajuste fino Prestador (Procura o bloco e o campo)
-        'Prestador_CNPJ': ['prestador_cnpj', 'prestador_cpfcnpj', 'prestador_cpf_cnpj', 'identificacaoprestador_cnpj'],
-        'Prestador_Razao': ['prestador_razãosocial', 'prestador_xnome', 'prestador_razão', 'prestador_nome', 'prestador_identificacao_nome'],
-        
-        # Ajuste fino Tomador
-        'Tomador_CNPJ': ['tomador_cnpj', 'tomador_cpfcnpj', 'tomador_cpf_cnpj', 'identificacaotomador_cnpj'],
-        'Tomador_Razao': ['tomador_razãosocial', 'tomador_xnome', 'tomador_razão', 'tomador_nome', 'tomador_identificacao_nome'],
-        
-        # Valores e Impostos
-        'Vlr_Bruto': ['valorservicos', 'vserv', 'vlrserv', 'valorbruto', 'v_serv'],
-        'ISS_Retido': ['issretido', 'vissret', 'iss_retido', 'v_iss_ret'],
-        'PIS_Retido': ['pisretido', 'vpisret', 'pis_retido'],
-        'COFINS_Retido': ['cofinsretido', 'vcofinsret', 'cofins_retido'],
-        'IRRF_Retido': ['valorir', 'vir', 'irrf_retido', 'virrf'],
-        'CSLL_Retido': ['valorcsll', 'vcsll', 'csll_retido'],
-        
-        # Ajuste fino Descrição
-        'Servico_Descricao': ['discriminacao', 'xserv', 'infadic', 'desc_serv', 'servico_discriminacao']
-    }
-
     final_df_data = {}
     if 'Arquivo_Origem' in df.columns:
         final_df_data['Arquivo'] = df['Arquivo_Origem']
 
-    for friendly_name, radicals in mapping.items():
-        found_col = None
-        # Prioriza colunas que contêm o termo exato no final (mais precisão)
-        for col in df.columns:
-            col_lower = col.lower()
-            if any(rad in col_lower for rad in radicals):
-                # Para CNPJ e Razão, verificamos se o radical casa com a origem (prestador/tomador)
-                if 'prestador' in friendly_name.lower() and 'tomador' in col_lower:
-                    continue
-                if 'tomador' in friendly_name.lower() and 'prestador' in col_lower:
-                    continue
-                
-                # Bloqueio de endereços
-                if not any(x in col_lower for x in ['endereco', 'logradouro', 'uf', 'cep', 'bairro']):
-                    found_col = col
-                    break
+    # Definição de busca por sufixos e contextos
+    # O código vai procurar: 'Algum radical no nome da coluna' AND 'Deve conter termo X' AND 'Não deve conter termo Y'
+    targets = {
+        'Nota_Numero': {'rads': ['numero', 'nnfse', 'numnf', 'nfnr'], 'must': [], 'not': []},
+        'Data_Emissao': {'rads': ['dataemissao', 'dtemic', 'dtrem', 'dhemi', 'dtaemi', 'datahora'], 'must': [], 'not': []},
         
-        if found_col:
-            # Tratamento para valores numéricos
+        'Prestador_CNPJ': {'rads': ['cnpj', 'cpfcnpj'], 'must': ['prestador'], 'not': ['tomador', 'intermediario']},
+        'Prestador_Razao': {'rads': ['razaosocial', 'xnome', 'razao', 'nome'], 'must': ['prestador'], 'not': ['tomador', 'intermediario', 'endereco']},
+        
+        'Tomador_CNPJ': {'rads': ['cnpj', 'cpfcnpj'], 'must': ['tomador'], 'not': ['prestador', 'intermediario']},
+        'Tomador_Razao': {'rads': ['razaosocial', 'xnome', 'razao', 'nome'], 'must': ['tomador'], 'not': ['prestador', 'intermediario', 'endereco']},
+        
+        'Vlr_Bruto': {'rads': ['valorservicos', 'vserv', 'vlrserv', 'valorbruto', 'vlrbruto'], 'must': [], 'not': ['retido', 'liquido']},
+        'ISS_Retido': {'rads': ['issretido', 'vissret', 'iss_retido', 'valoriss'], 'must': ['retido'], 'not': []},
+        'PIS_Retido': {'rads': ['pisretido', 'vpisret', 'pis_retido', 'valorpis'], 'must': ['retido'], 'not': []},
+        'COFINS_Retido': {'rads': ['cofinsretido', 'vcofinsret', 'cofins_retido', 'valorcofins'], 'must': ['retido'], 'not': []},
+        'IRRF_Retido': {'rads': ['valorir', 'vir', 'irrf_retido', 'virrf'], 'must': ['retido'], 'not': []},
+        'CSLL_Retido': {'rads': ['valorcsll', 'vcsll', 'csll_retido'], 'must': ['retido'], 'not': []},
+        
+        'Servico_Descricao': {'rads': ['discriminacao', 'xserv', 'infadic', 'desc_serv', 'itemlistaservico'], 'must': [], 'not': ['prestador', 'tomador']}
+    }
+
+    for friendly_name, rules in targets.items():
+        found_val = None
+        for col in df.columns:
+            c_low = col.lower()
+            # 1. Verifica se tem algum dos radicais
+            if any(r in c_low for r in rules['rads']):
+                # 2. Verifica se atende aos critérios de inclusão (ex: tem que ter 'prestador')
+                if all(m in c_low for m in rules['must']):
+                    # 3. Verifica se atende aos critérios de exclusão (ex: não pode ter 'endereco')
+                    if not any(n in c_low for n in rules['not'] + ['endereco', 'logradouro', 'uf', 'cep', 'bairro']):
+                        # Priorizamos colunas que não estejam vazias (NaN)
+                        if found_val is None or pd.isna(found_val):
+                             found_val = df[col]
+        
+        if found_val is not None:
+            # Tratamento numérico para impostos e valores
             if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL']):
-                final_df_data[friendly_name] = pd.to_numeric(df[found_col], errors='coerce').fillna(0.0)
+                final_df_data[friendly_name] = pd.to_numeric(found_val, errors='coerce').fillna(0.0)
             else:
-                final_df_data[friendly_name] = df[found_col]
+                final_df_data[friendly_name] = found_val.fillna("Não Identificado")
         else:
-            final_df_data[friendly_name] = "Não localizado"
+            final_df_data[friendly_name] = 0.0 if 'Vlr' in friendly_name or 'Retido' in friendly_name else "Não Localizado"
 
     return pd.DataFrame(final_df_data)
 
@@ -129,12 +124,12 @@ def process_files(uploaded_files):
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria Fiscal: Correção de Mapeamento de Dados")
+    st.subheader("Auditoria Fiscal: Motor de Busca Profunda (Anti-None)")
 
     uploaded_files = st.file_uploader("Upload de XML ou ZIP", type=["xml", "zip"], accept_multiple_files=True)
 
     if uploaded_files:
-        with st.spinner('Refinando captura de CNPJ, Datas e Descrições...'):
+        with st.spinner('Escaneando camadas do XML para encontrar dados perdidos...'):
             df_raw = process_files(uploaded_files)
         
         if not df_raw.empty:
@@ -142,7 +137,7 @@ def main():
 
             st.success(f"Notas processadas: {len(df_final)}")
             
-            st.write("### Conferência Detalhada")
+            st.write("### Conferência de Auditoria")
             st.dataframe(df_final)
 
             output = io.BytesIO()
@@ -151,16 +146,16 @@ def main():
                 
                 workbook = writer.book
                 worksheet = writer.sheets['Auditoria']
-                header_fmt = workbook.add_format({'bold': True, 'bg_color': '#FF69B4', 'font_color': 'white'})
+                header_fmt = workbook.add_format({'bold': True, 'bg_color': '#FF69B4', 'font_color': 'white', 'border': 1})
                 
                 for i, col in enumerate(df_final.columns):
                     worksheet.write(0, i, col, header_fmt)
                     worksheet.set_column(i, i, 20)
 
             st.download_button(
-                label="📥 Baixar Excel Corrigido",
+                label="📥 Baixar Excel Sem Erros",
                 data=output.getvalue(),
-                file_name="servtax_conferencia_fina.xlsx",
+                file_name="portal_servtax_final.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
