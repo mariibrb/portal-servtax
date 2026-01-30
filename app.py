@@ -22,10 +22,8 @@ st.markdown("""
 def flatten_dict(d, parent_key='', sep='_'):
     items = []
     for k, v in d.items():
-        # Limpa prefixos de namespace (ns2:tag -> tag)
         clean_k = k.split(':')[-1] if ':' in k else k
         new_key = f"{parent_key}{sep}{clean_k}" if parent_key else clean_k
-        
         if isinstance(v, dict):
             items.extend(flatten_dict(v, new_key, sep=sep).items())
         elif isinstance(v, list):
@@ -39,21 +37,16 @@ def flatten_dict(d, parent_key='', sep='_'):
     return dict(items)
 
 def simplify_columns(df):
-    """
-    Simplifica os nomes das colunas pegando apenas o último termo 
-    após o separador '_' para facilitar a leitura.
-    """
+    """Simplifica os nomes das colunas mantendo a integridade do DataFrame."""
     new_columns = {}
     for col in df.columns:
         if '_' in col:
-            # Pega o último termo (ex: Valores_ValorIss -> ValorIss)
-            simple_name = col.split('_')[-1]
-            
-            # Se o nome simplificado já existir (duplicidade), mantém um pouco do pai
-            if simple_name in new_columns.values():
-                parts = col.split('_')
-                simple_name = f"{parts[-2]}_{parts[-1]}" if len(parts) > 1 else col
-            
+            parts = col.split('_')
+            # Tenta pegar o último termo
+            simple_name = parts[-1]
+            # Se for um nome muito comum ou curto, tenta pegar o pai + filho para evitar erro
+            if simple_name.lower() in ['valor', 'codigo', 'numero', 'data'] and len(parts) > 1:
+                simple_name = f"{parts[-2]}_{parts[-1]}"
             new_columns[col] = simple_name
         else:
             new_columns[col] = col
@@ -91,36 +84,37 @@ def process_files(uploaded_files):
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria Fiscal de NFS-e (Colunas Simplificadas)")
+    st.subheader("Auditoria Fiscal de NFS-e (Consolidado)")
 
     uploaded_files = st.file_uploader("Arraste seus XMLs ou ZIPs aqui", type=["xml", "zip"], accept_multiple_files=True)
 
     if uploaded_files:
-        with st.spinner('Extraindo e simplificando dados...'):
+        with st.spinner('Extraindo dados...'):
             df_total = process_files(uploaded_files)
         
         if not df_total.empty:
-            # 1. Simplifica os nomes das colunas
-            df_total = simplify_columns(df_total)
-
-            # 2. Filtro de Auditoria
+            # Palavras-chave para auditoria
             keywords = [
                 'Numero', 'Data', 'Cnpj', 'RazaoSocial', 'Valor', 'Iss', 'Pis', 
                 'Cofins', 'Ir', 'Csll', 'Ibs', 'Cbs', 'Nbs', 'Cclass', 'Descricao', 'Chave'
             ]
             
+            # Identifica quais colunas originais devem ser mantidas
             cols_to_keep = ['Arquivo_Origem']
             for col in df_total.columns:
                 if any(key.lower() in col.lower() for key in keywords):
                     if col not in cols_to_keep:
                         cols_to_keep.append(col)
             
-            # Garante que não ficaremos com coluna única
-            df_final = df_total[cols_to_keep] if len(cols_to_keep) > 5 else df_total
-
-            st.success(f"Concluído! {len(df_final)} notas e {len(df_final.columns)} colunas amigáveis.")
+            # Filtra as colunas ORIGINAIS primeiro para evitar KeyError
+            df_filtrado = df_total[cols_to_keep] if len(cols_to_keep) > 5 else df_total
             
-            st.write("### Preview da Auditoria (Nomes Curtos)")
+            # AGORA sim simplifica os nomes das colunas para o usuário
+            df_final = simplify_columns(df_filtrado)
+
+            st.success(f"Concluído! {len(df_final)} notas e {len(df_final.columns)} colunas identificadas.")
+            
+            st.write("### Preview da Auditoria")
             st.dataframe(df_final.head(10))
 
             output = io.BytesIO()
@@ -136,11 +130,11 @@ def main():
             st.download_button(
                 label="📥 Baixar Excel Simplificado",
                 data=output.getvalue(),
-                file_name="portal_servtax_limpo.xlsx",
+                file_name="portal_servtax_auditoria.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            st.warning("Nenhum dado encontrado.")
+            st.warning("Nenhum XML válido encontrado.")
 
 if __name__ == "__main__":
     main()
