@@ -11,17 +11,15 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- ESTILO SENTINELA DINÂMICO (LAYOUT PADRÃO) ---
+# --- ESTILO SENTINELA DINÂMICO ---
 def aplicar_estilo_sentinela_zonas():
     st.markdown("""
         <style>
         @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;800&family=Plus+Jakarta+Sans:wght@400;700&display=swap');
 
-        /* 1. FUNDAÇÃO E CABEÇALHO */
         header, [data-testid="stHeader"] { display: none !important; }
         .stApp { transition: background 0.8s ease-in-out !important; }
 
-        /* 2. MENU SUPERIOR E BOTÕES */
         div.stButton > button {
             color: #6C757D !important; 
             background-color: #FFFFFF !important; 
@@ -41,7 +39,6 @@ def aplicar_estilo_sentinela_zonas():
             box-shadow: 0 10px 20px rgba(0,0,0,0.1) !important;
         }
 
-        /* 3. ZONA ROSA (LAYOUT RIHANNA) */
         .stApp { 
             background: radial-gradient(circle at top right, #FFDEEF 0%, #F8F9FA 100%) !important; 
         }
@@ -84,7 +81,7 @@ def aplicar_estilo_sentinela_zonas():
 
 aplicar_estilo_sentinela_zonas()
 
-# --- LÓGICA DE PROCESSAMENTO (MAINTAINED) ---
+# --- LÓGICA DE PROCESSAMENTO ---
 def get_xml_value(root, tags):
     for tag in tags:
         element = root.find(f".//{{*}}{tag}")
@@ -132,7 +129,6 @@ def process_xml_file(content, filename):
 # --- ÁREA VISUAL ---
 st.title("PORTAL SERVTAX - AUDITORIA FISCAL")
 
-# --- SEÇÃO DE MANUAL E RESUMO (LADO A LADO) ---
 col1, col2 = st.columns(2)
 
 with col1:
@@ -140,10 +136,10 @@ with col1:
     <div class="instrucoes-card">
         <h3>📖 Passo a Passo</h3>
         <ol>
-            <li><b>Upload:</b> Arraste arquivos <b>.XML</b> ou <b>.ZIP</b> para o campo abaixo.</li>
-            <li><b>Processamento:</b> O sistema realizará a leitura em cascata automaticamente.</li>
-            <li><b>Auditoria:</b> Verifique o <b>Diagnóstico</b> final para identificar divergências.</li>
-            <li><b>Exportação:</b> Baixe o relatório completo em Excel para sua análise.</li>
+            <li><b>Upload:</b> Arraste arquivos <b>.XML</b> ou <b>.ZIP</b> abaixo.</li>
+            <li><b>Ação:</b> Clique em <b>"INICIAR AUDITORIA"</b>.</li>
+            <li><b>Conferência:</b> Analise o <b>Diagnóstico</b> de divergências.</li>
+            <li><b>Saída:</b> Baixe o Excel final para auditoria.</li>
         </ol>
     </div>
     """, unsafe_allow_html=True)
@@ -153,22 +149,22 @@ with col2:
     <div class="instrucoes-card">
         <h3>📊 O que será obtido?</h3>
         <ul>
-            <li><b>Mapeamento Universal:</b> Leitura de tags SP, Nacional e centenas de prefeituras.</li>
-            <li><b>Blindagem de Retenção:</b> Separação rigorosa de ISS Próprio e Retido.</li>
-            <li><b>Diagnóstico Inteligente:</b> Alerta visual (⚠️) se Valor Bruto e Líquido divergirem.</li>
-            <li><b>Impostos Federais:</b> Captura automática de PIS, COFINS, CSLL e IRRF.</li>
+            <li><b>Leitura Universal:</b> Dados de centenas de prefeituras consolidados.</li>
+            <li><b>Gestão de ISS:</b> Separação entre ISS Próprio e Retido.</li>
+            <li><b>Impostos Federais:</b> Captura de PIS, COFINS, CSLL e IRRF.</li>
+            <li><b>Diagnóstico:</b> Identificação de notas com retenções pendentes.</li>
         </ul>
     </div>
     """, unsafe_allow_html=True)
 
 st.markdown("---")
 
-uploaded_files = st.file_uploader("Arraste os arquivos XML ou ZIP aqui para auditar", type=["xml", "zip"], accept_multiple_files=True)
+uploaded_files = st.file_uploader("Arraste os arquivos XML ou ZIP aqui", type=["xml", "zip"], accept_multiple_files=True)
 
 if uploaded_files:
     if st.button("🚀 INICIAR AUDITORIA FISCAL"):
         data_rows = []
-        with st.spinner("Analisando XMLs..."):
+        with st.spinner("Processando..."):
             for uploaded_file in uploaded_files:
                 if uploaded_file.name.endswith('.zip'):
                     with zipfile.ZipFile(uploaded_file) as z:
@@ -186,16 +182,14 @@ if uploaded_files:
                 for col in cols_fin:
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
 
-                # Diagnóstico
                 df['Diagnostico'] = df.apply(lambda r: "⚠️ Divergência!" if abs(r['Vlr_Bruto'] - r['Vlr_Liquido']) > 0.01 else "✅", axis=1)
 
-                # Reordenação
                 cols = list(df.columns)
                 if 'Ret_ISS' in cols and 'ISS_Valor' in cols:
                     cols.insert(cols.index('ISS_Valor') + 1, cols.pop(cols.index('Ret_ISS')))
                     df = df[cols]
 
-                st.success(f"✅ {len(df)} notas processadas com sucesso!")
+                st.success(f"✅ {len(df)} notas processadas!")
                 st.dataframe(df)
 
                 output = io.BytesIO()
@@ -214,10 +208,8 @@ if uploaded_files:
                             worksheet.set_column(i, i, 22)
 
                 st.download_button(
-                    label="📥 BAIXAR PLANILHA DE AUDITORIA",
+                    label="📥 BAIXAR EXCEL AJUSTADO",
                     data=output.getvalue(),
                     file_name="portal_servtax_auditoria.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
-            else:
-                st.error("Nenhum dado capturado nos arquivos enviados.")
