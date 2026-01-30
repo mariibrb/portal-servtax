@@ -38,30 +38,36 @@ def flatten_dict(d, parent_key='', sep='_'):
 
 def simplify_and_filter(df):
     """
-    Filtra colunas essenciais de auditoria, incluindo tags de valores retidos.
+    Filtra colunas com mapeamento expandido baseado em padrões reais (SP, Guarulhos, Nacional).
     """
     mapping = {
-        'Nota_Numero': ['numero', 'nfnr', 'numnf'],
-        'Data_Emissao': ['dataemissao', 'dtemic', 'dtrem'],
-        'Prestador_CNPJ': ['prestador_cnpj', 'prestador_cpfcnpj', 'prestador_identificacao'],
-        'Prestador_Razao': ['prestador_razãosocial', 'prestador_xnome', 'prestador_razão'],
-        'Tomador_CNPJ': ['tomador_cnpj', 'tomador_cpfcnpj', 'tomador_identificacao'],
-        'Tomador_Razao': ['tomador_razãosocial', 'tomador_xnome', 'tomador_razão'],
-        'Vlr_Bruto': ['valorservicos', 'vserv', 'vlrserv', 'valorbruto'],
-        'Vlr_Liquido': ['valorliquido', 'vliq', 'vlrliq'],
-        # Impostos Totais / Alíquotas
-        'ISS_Total': ['valoriss', 'viss'],
-        'ISS_Retido': ['issretido', 'vissret', 'iss_retido'],
-        'PIS_Total': ['valorpis', 'vpis'],
-        'PIS_Retido': ['pisretido', 'vpisret', 'pis_retido'],
-        'COFINS_Total': ['valorcofins', 'vcofins'],
-        'COFINS_Retido': ['cofinsretido', 'vcofinsret', 'cofins_retido'],
-        'IRRF_Retido': ['valorir', 'vir', 'irrf_retido', 'virrf'],
-        'CSLL_Retido': ['valorcsll', 'vcsll', 'csll_retido'],
+        'Nota_Numero': ['numero', 'nfnr', 'numnf', 'nnfse', 'nrnotafiscal'],
+        'Data_Emissao': ['dataemissao', 'dtemic', 'dtrem', 'dtaemi', 'dh_emi'],
+        'Prestador_CNPJ': ['prestador_cnpj', 'prestador_cpfcnpj', 'prestador_identificacao', 'prestador_id'],
+        'Prestador_Razao': ['prestador_razãosocial', 'prestador_xnome', 'prestador_razão', 'prestador_nome'],
+        'Tomador_CNPJ': ['tomador_cnpj', 'tomador_cpfcnpj', 'tomador_identificacao', 'tomador_id'],
+        'Tomador_Razao': ['tomador_razãosocial', 'tomador_xnome', 'tomador_razão', 'tomador_nome'],
+        'Vlr_Bruto': ['valorservicos', 'vserv', 'vlrserv', 'valorbruto', 'v_serv'],
+        'Vlr_Liquido': ['valorliquido', 'vliq', 'vlrliq', 'v_liq'],
+        # ISS
+        'ISS_Total': ['valoriss', 'viss', 'v_iss'],
+        'ISS_Retido': ['issretido', 'vissret', 'iss_retido', 'v_iss_ret'],
+        # PIS
+        'PIS_Total': ['valorpis', 'vpis', 'v_pis'],
+        'PIS_Retido': ['pisretido', 'vpisret', 'v_pis_ret'],
+        # COFINS
+        'COFINS_Total': ['valorcofins', 'vcofins', 'v_cofins'],
+        'COFINS_Retido': ['cofinsretido', 'vcofinsret', 'v_cofins_ret'],
+        # IRRF
+        'IRRF_Retido': ['valorir', 'vir', 'irrf_retido', 'virrf', 'v_ir'],
+        # CSLL
+        'CSLL_Retido': ['valorcsll', 'vcsll', 'csll_retido', 'v_csll'],
+        # INSS
+        'INSS_Retido': ['valorinss', 'vinss', 'v_inss'],
         # Reforma Tributária
-        'IBS_Valor': ['ibs_vlr', 'ibs_valor'],
-        'CBS_Valor': ['cbs_vlr', 'cbs_valor'],
-        'Servico_Descricao': ['discriminacao', 'xserv', 'infadic']
+        'IBS': ['ibs_vlr', 'ibs_valor', 'v_ibs'],
+        'CBS': ['cbs_vlr', 'cbs_valor', 'v_cbs'],
+        'Servico_Descricao': ['discriminacao', 'xserv', 'infadic', 'desc_serv']
     }
 
     final_df_data = {}
@@ -70,18 +76,22 @@ def simplify_and_filter(df):
 
     for friendly_name, radicals in mapping.items():
         found_col = None
+        # Procura a melhor coluna para o radical, evitando endereços
         for col in df.columns:
-            # Verifica se algum radical está no nome da coluna (ignora case)
-            if any(rad in col.lower() for rad in radicals):
-                # Filtro extra para evitar endereços
-                if not any(x in col.lower() for x in ['endereco', 'logradouro', 'uf', 'cep', 'bairro']):
+            col_lower = col.lower()
+            if any(rad in col_lower for rad in radicals):
+                if not any(x in col_lower for x in ['endereco', 'logradouro', 'uf', 'cep', 'bairro', 'complemento']):
                     found_col = col
                     break
         
         if found_col:
-            final_df_data[friendly_name] = df[found_col]
+            # Converte para numérico se for valor de imposto
+            if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL', 'IBS', 'CBS', 'INSS']):
+                final_df_data[friendly_name] = pd.to_numeric(df[found_col], errors='coerce').fillna(0.0)
+            else:
+                final_df_data[friendly_name] = df[found_col]
         else:
-            final_df_data[friendly_name] = "0.00" # Padrão para valores não encontrados
+            final_df_data[friendly_name] = 0.0 if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL', 'IBS', 'CBS', 'INSS']) else "Não encontrado"
 
     return pd.DataFrame(final_df_data)
 
@@ -117,45 +127,48 @@ def process_files(uploaded_files):
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria de Retenções Fiscais (Padrão Nacional)")
+    st.subheader("Auditoria Fiscal de Alta Precisão (Retidos e Totais)")
 
-    uploaded_files = st.file_uploader("Upload de XML ou ZIP (incluindo pastas compactadas)", type=["xml", "zip"], accept_multiple_files=True)
+    uploaded_files = st.file_uploader("Upload de XML ou ZIP", type=["xml", "zip"], accept_multiple_files=True)
 
     if uploaded_files:
-        with st.spinner('Analisando retenções e impostos...'):
+        with st.spinner('Realizando mapeamento profundo de tags...'):
             df_raw = process_files(uploaded_files)
         
         if not df_raw.empty:
             df_final = simplify_and_filter(df_raw)
 
-            st.success(f"Notas processadas: {len(df_final)}")
+            st.success(f"Concluído: {len(df_final)} notas mapeadas.")
             
-            st.write("### Tabela para Conferência de Escrituração")
+            st.write("### Conferência de Impostos")
             st.dataframe(df_final)
 
-            # Geração do Excel formatado
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                df_final.to_excel(writer, index=False, sheet_name='Auditoria_Fisc')
+                df_final.to_excel(writer, index=False, sheet_name='Auditoria_Fiscal')
                 
-                # Ajuste de colunas no Excel
                 workbook = writer.book
-                worksheet = writer.sheets['Auditoria_Fisc']
-                header_format = workbook.add_format({'bold': True, 'bg_color': '#FFDEEF', 'border': 1})
+                worksheet = writer.sheets['Auditoria_Fiscal']
                 
-                for col_num, value in enumerate(df_final.columns.values):
-                    worksheet.write(0, col_num, value, header_format)
-                    column_len = max(df_final[value].astype(str).str.len().max(), len(value)) + 2
-                    worksheet.set_column(col_num, col_num, min(column_len, 40))
+                # Formatação de Dinheiro para as colunas de valores
+                money_fmt = workbook.add_format({'num_format': '#,##0.00'})
+                header_fmt = workbook.add_format({'bold': True, 'bg_color': '#FF69B4', 'font_color': 'white'})
+
+                for i, col in enumerate(df_final.columns):
+                    worksheet.write(0, i, col, header_fmt)
+                    if any(x in col for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL', 'IBS', 'CBS', 'INSS']):
+                        worksheet.set_column(i, i, 15, money_fmt)
+                    else:
+                        worksheet.set_column(i, i, 25)
 
             st.download_button(
-                label="📥 Baixar Planilha de Retenções",
+                label="📥 Baixar Excel de Auditoria Completo",
                 data=output.getvalue(),
-                file_name="portal_servtax_retencoes.xlsx",
+                file_name="auditoria_fiscal_completa.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            st.warning("Nenhum arquivo XML válido foi encontrado.")
+            st.warning("Nenhum arquivo XML válido encontrado.")
 
 if __name__ == "__main__":
     main()
