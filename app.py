@@ -7,7 +7,7 @@ import zipfile
 # Configuração da Página
 st.set_page_config(page_title="Portal ServTax", layout="wide", page_icon="📑")
 
-# Estilo Rihanna (Rosa e Branco)
+# Estilo Rihanna
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&family=Plus+Jakarta+Sans:wght@400;700&display=swap');
@@ -39,28 +39,28 @@ def flatten_dict(d, parent_key='', sep='_'):
 
 def simplify_and_filter(df):
     """
-    Define as colunas da planilha baseada nas tags exatas encontradas nos arquivos.
+    Aplica equivalência direta baseada nas tags identificadas nos XMLs.
     """
     final_df_data = {}
     if 'Arquivo_Origem' in df.columns:
         final_df_data['Arquivo'] = df['Arquivo_Origem']
 
-    # MAPEAMENTO POR TAGS EXATAS (Sufixos do achatamento)
+    # MAPEAMENTO TÉCNICO POR TAG (Equivalências SP vs Nacional)
     mapping = {
         'Nota_Numero': ['nNFSe', 'NumeroNFe', 'nNF'],
-        'Data_Emissao': ['dhProc', 'DataEmissaoNFe', 'dhEmi'],
+        'Data_Emissao': ['dhProc', 'DataEmissaoNFe', 'dhEmi', 'DataEmissao'],
         
         # PRESTADOR
         'Prestador_CNPJ': ['emit_CNPJ', 'CPFCNPJPrestador_CNPJ', 'CNPJPrestador'],
         'Prestador_Razao': ['emit_xNome', 'RazaoSocialPrestador', 'xNomePrestador'],
         
-        # TOMADOR (Onde estava falhando)
+        # TOMADOR (Campos críticos corrigidos)
         'Tomador_CNPJ': ['toma_CNPJ', 'CPFCNPJTomador_CNPJ', 'CPFCNPJTomador_CPF', 'dest_CNPJ'],
         'Tomador_Razao': ['toma_xNome', 'RazaoSocialTomador', 'dest_xNome', 'xNomeTomador'],
         
         # VALORES E IMPOSTOS
         'Vlr_Bruto': ['vServ', 'ValorServicos', 'vNF', 'v_serv'],
-        'ISS_Retido': ['vISSRet', 'ValorISS', 'vISSQN', 'ISSRetido'],
+        'ISS_Valor': ['vISSRet', 'ValorISS', 'vISSQN', 'ValorISS_Retido'],
         'PIS_Retido': ['vPIS', 'ValorPIS', 'pis_retido'],
         'COFINS_Retido': ['vCOFINS', 'ValorCOFINS', 'cofins_retido'],
         'IRRF_Retido': ['vIR', 'ValorIR', 'ir_retido'],
@@ -73,13 +73,12 @@ def simplify_and_filter(df):
     for friendly_name, tags in mapping.items():
         found_series = None
         for col in df.columns:
-            # Verifica se a coluna termina EXATAMENTE com uma das tags mapeadas
+            # Verifica se a coluna termina exatamente com a tag mapeada
             if any(col.endswith(tag) for tag in tags):
-                # Filtro para não trocar Prestador por Tomador
+                # Filtro para garantir que Prestador não pegue dados do Tomador
                 if 'Prestador' in friendly_name and ('Tomador' in col or 'toma' in col or 'dest' in col): continue
                 if 'Tomador' in friendly_name and ('Prestador' in col or 'emit' in col): continue
                 
-                # Se encontrar a coluna, verifica se ela tem dados
                 current_series = df[col]
                 if found_series is None or (isinstance(found_series, pd.Series) and found_series.isnull().all()):
                     found_series = current_series
@@ -88,9 +87,9 @@ def simplify_and_filter(df):
             if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL']):
                 final_df_data[friendly_name] = pd.to_numeric(found_series, errors='coerce').fillna(0.0)
             else:
-                final_df_data[friendly_name] = found_series.fillna("Não Localizado")
+                final_df_data[friendly_name] = found_series.fillna("Não Identificado")
         else:
-            final_df_data[friendly_name] = 0.0 if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL']) else "Não Localizado"
+            final_df_data[friendly_name] = 0.0 if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL']) else "Não Identificado"
 
     return pd.DataFrame(final_df_data)
 
@@ -107,19 +106,18 @@ def extract_xml_from_zip(zip_data, extracted_list):
     except: pass
 
 def process_files(uploaded_files):
-    all_extracted_data = []
+    all_data = []
     for uploaded_file in uploaded_files:
         content = uploaded_file.read()
         if uploaded_file.name.lower().endswith('.xml'):
-            all_extracted_data.append({'name': uploaded_file.name, 'content': content})
+            all_data.append({'name': uploaded_file.name, 'content': content})
         elif uploaded_file.name.lower().endswith('.zip'):
-            extract_xml_from_zip(content, all_extracted_data)
+            extract_xml_from_zip(content, all_data)
             
     final_rows = []
-    for item in all_extracted_data:
+    for item in all_data:
         try:
             data_dict = xmltodict.parse(item['content'])
-            # Processa se for lista de notas ou nota única
             if isinstance(data_dict, list):
                 for sub in data_dict:
                     flat = flatten_dict(sub)
@@ -139,7 +137,7 @@ def main():
     uploaded_files = st.file_uploader("Upload de XML ou ZIP", type=["xml", "zip"], accept_multiple_files=True)
 
     if uploaded_files:
-        with st.spinner('Lendo tags estruturadas...'):
+        with st.spinner('A processar tags estruturadas...'):
             df_raw = process_files(uploaded_files)
         
         if not df_raw.empty:
@@ -165,7 +163,7 @@ def main():
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            st.warning("Nenhum dado encontrado nos arquivos.")
+            st.warning("Nenhum dado encontrado.")
 
 if __name__ == "__main__":
     main()
