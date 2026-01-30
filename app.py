@@ -38,50 +38,51 @@ def flatten_dict(d, parent_key='', sep='_'):
     return dict(items)
 
 def simplify_and_filter(df):
+    """
+    Motor de Equivalência: Mapeia diferentes padrões (Nacional vs SP) para a mesma coluna.
+    """
     final_df_data = {}
     if 'Arquivo_Origem' in df.columns:
         final_df_data['Arquivo'] = df['Arquivo_Origem']
 
-    # MAPEAMENTO HÍBRIDO (SP + NACIONAL)
+    # MAPEAMENTO DE EQUIVALÊNCIAS
     mapping = {
-        'Nota_Numero': ['numero', 'nnfse', 'numnf', 'nfnr', 'notafiscal'],
-        'Data_Emissao': ['dataemissao', 'dtemic', 'dtrem', 'dhemi', 'dtaemi', 'datahora', 'dh_emi'],
+        'Nota_Numero': ['nNFSe', 'NumeroNFe', 'nNF', 'numero'],
+        'Data_Emissao': ['dhProc', 'DataEmissaoNFe', 'dataemissao', 'dhEmi'],
         
-        # PRESTADOR (Suporta emit e prestador)
-        'Prestador_CNPJ': ['prestador_cnpj', 'prestador_cpfcnpj', 'emit_cnpj', 'prestador_id'],
-        'Prestador_Razao': ['prestador_razaosocial', 'prestador_xnome', 'emit_xnome', 'prestador_nome'],
+        # PRESTADOR (Equivalência Emit vs Prestador SP)
+        'Prestador_CNPJ': ['emit_CNPJ', 'CPFCNPJPrestador_CNPJ', 'prestador_cnpj'],
+        'Prestador_Razao': ['emit_xNome', 'RazaoSocialPrestador', 'prestador_razao'],
         
-        # TOMADOR (Suporta toma, dest e tomador)
-        'Tomador_CNPJ': ['tomador_cnpj', 'tomador_cpfcnpj', 'toma_cnpj', 'dest_cnpj', 'identificacaotomador_cnpj'],
-        'Tomador_Razao': ['tomador_razaosocial', 'tomador_xnome', 'toma_xnome', 'dest_xnome', 'razaosocialtomador'],
+        # TOMADOR (Equivalência Toma vs Tomador SP) - O ajuste que faltava!
+        'Tomador_CNPJ': ['toma_CNPJ', 'CPFCNPJTomador_CNPJ', 'CPFCNPJTomador_CPF', 'toma_CPF', 'tomador_cnpj'],
+        'Tomador_Razao': ['toma_xNome', 'RazaoSocialTomador', 'tomador_razao', 'dest_xNome'],
         
-        # VALORES
-        'Vlr_Bruto': ['valorservicos', 'vserv', 'vlrserv', 'valorbruto', 'v_serv'],
-        'ISS_Retido': ['issretido', 'vissret', 'iss_retido', 'valoriss', 'viss'],
-        'PIS_Retido': ['pisretido', 'vpisret', 'pis_retido', 'valorpis', 'vpis'],
-        'COFINS_Retido': ['cofinsretido', 'vcofinsret', 'cofins_retido', 'valorcofins', 'vcofins'],
-        'IRRF_Retido': ['valorir', 'vir', 'irrf_retido', 'virrf', 'v_ir'],
-        'CSLL_Retido': ['valorcsll', 'vcsll', 'csll_retido', 'v_csll'],
+        # VALORES (Equivalência vServ vs ValorServicos SP)
+        'Vlr_Bruto': ['vServ', 'ValorServicos', 'valorbruto', 'v_serv', 'vNF'],
         
-        # DESCRIÇÃO (Ajuste para xDescServ e Discriminacao)
-        'Servico_Descricao': ['discriminacao', 'xserv', 'xdescserv', 'desc_serv', 'infadic', 'xprod']
+        # RETENÇÕES (Equivalência vPIS vs ValorPIS SP)
+        'ISS_Retido': ['vISSRet', 'ValorISS', 'iss_retido'],
+        'PIS_Retido': ['vPIS', 'ValorPIS', 'pis_retido'],
+        'COFINS_Retido': ['vCOFINS', 'ValorCOFINS', 'cofins_retido'],
+        'IRRF_Retido': ['vIR', 'ValorIR', 'ir_retido'],
+        'CSLL_Retido': ['vCSLL', 'ValorCSLL', 'csll_retido'],
+        
+        # DESCRIÇÃO (Equivalência xDescServ vs Discriminacao SP)
+        'Servico_Descricao': ['xDescServ', 'Discriminacao', 'xServ', 'infCpl', 'xProd']
     }
 
     for friendly_name, radicals in mapping.items():
         found_series = None
         for col in df.columns:
-            c_low = col.lower()
-            if any(rad in c_low for rad in radicals):
-                # Proteção para não misturar Prestador/Emitente com Tomador/Destinatário
-                if 'prestador' in friendly_name.lower() or 'emit' in friendly_name.lower():
-                    if 'tomador' in c_low or 'dest' in c_low or 'toma' in c_low: continue
-                if 'tomador' in friendly_name.lower() or 'toma' in friendly_name.lower() or 'dest' in friendly_name.lower():
-                    if 'prestador' in c_low or 'emit' in c_low: continue
+            # Verifica se o nome da coluna TERMINA com algum dos radicais (mais preciso para aninhados)
+            if any(col.endswith(rad) for rad in radicals):
+                # Proteção de Contexto
+                if 'Prestador' in friendly_name and ('Tomador' in col or 'toma' in col.lower()): continue
+                if 'Tomador' in friendly_name and ('Prestador' in col or 'emit' in col.lower()): continue
                 
-                # Bloqueio de endereços
-                if not any(x in c_low for x in ['endereco', 'logradouro', 'uf', 'cep', 'bairro', 'municipio']):
-                    if found_series is None or (isinstance(found_series, pd.Series) and found_series.isnull().all()):
-                        found_series = df[col]
+                if found_series is None or (isinstance(found_series, pd.Series) and found_series.isnull().all()):
+                    found_series = df[col]
 
         if found_series is not None:
             if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL']):
@@ -132,18 +133,18 @@ def process_files(uploaded_files):
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria Fiscal: Mapeamento São Paulo & Padrão Nacional")
+    st.subheader("Auditoria Fiscal: Motor de Equivalência SP vs Nacional")
 
     uploaded_files = st.file_uploader("Upload de XML ou ZIP", type=["xml", "zip"], accept_multiple_files=True)
 
     if uploaded_files:
-        with st.spinner('Consolidando padrões de arquivos...'):
+        with st.spinner('Realizando equivalência de tags fiscais...'):
             df_raw = process_files(uploaded_files)
         
         if not df_raw.empty:
             df_final = simplify_and_filter(df_raw)
 
-            st.success(f"Sucesso! {len(df_final)} notas processadas.")
+            st.success(f"Notas processadas: {len(df_final)}")
             st.dataframe(df_final)
 
             output = io.BytesIO()
@@ -159,7 +160,7 @@ def main():
             st.download_button(
                 label="📥 Baixar Excel de Auditoria",
                 data=output.getvalue(),
-                file_name="portal_servtax_consolidado.xlsx",
+                file_name="portal_servtax_equivalencia.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
