@@ -39,24 +39,24 @@ def flatten_dict(d, parent_key='', sep='_'):
 
 def simplify_and_filter(df):
     """
-    Motor de Equivalência Refinado: Identifica padrões SP e Nacional para dados cadastrais.
+    Motor de Equivalência Refinado: Mapeia padrões SP e Nacional para as mesmas colunas.
     """
     final_df_data = {}
     if 'Arquivo_Origem' in df.columns:
         final_df_data['Arquivo'] = df['Arquivo_Origem']
 
-    # MAPEAMENTO DE EQUIVALÊNCIAS BASEADO NOS SEUS XMLS
+    # MAPEAMENTO DE EQUIVALÊNCIAS BASEADO NOS SEUS XMLS (SP vs NACIONAL)
     mapping = {
         'Nota_Numero': ['nNFSe', 'NumeroNFe', 'nNF', 'numero'],
         'Data_Emissao': ['dhProc', 'DataEmissaoNFe', 'DataEmissao', 'dhEmi'],
         
-        # PRESTADOR (Equivalência Emit vs Prestador SP)
+        # PRESTADOR
         'Prestador_CNPJ': ['emit_CNPJ', 'CPFCNPJPrestador_CNPJ', 'CNPJPrestador', 'prestador_cnpj'],
         'Prestador_Razao': ['emit_xNome', 'RazaoSocialPrestador', 'xNomePrestador', 'prestador_razao'],
         
-        # TOMADOR (Equivalência Toma vs Tomador SP)
-        'Tomador_CNPJ': ['toma_CNPJ', 'CPFCNPJTomador_CNPJ', 'CPFCNPJTomador_CPF', 'toma_CPF', 'CNPJTomador'],
-        'Tomador_Razao': ['toma_xNome', 'RazaoSocialTomador', 'xNomeTomador', 'dest_xNome'],
+        # TOMADOR
+        'Tomador_CNPJ': ['toma_CNPJ', 'CPFCNPJTomador_CNPJ', 'CPFCNPJTomador_CPF', 'toma_CPF', 'CNPJTomador', 'tomador_cnpj'],
+        'Tomador_Razao': ['toma_xNome', 'RazaoSocialTomador', 'xNomeTomador', 'dest_xNome', 'tomador_razao'],
         
         # VALORES
         'Vlr_Bruto': ['vServ', 'ValorServicos', 'valorbruto', 'v_serv', 'vNF'],
@@ -75,14 +75,16 @@ def simplify_and_filter(df):
     for friendly_name, radicals in mapping.items():
         found_series = None
         for col in df.columns:
-            # Busca ignorando case e verificando se o nome da coluna termina com o radical
             col_lower = col.lower()
+            # Verifica se o nome da coluna TERMINA com o radical (ignora case)
             if any(col_lower.endswith(rad.lower()) for rad in radicals):
                 # Filtro de Contexto para não cruzar Prestador/Tomador
-                if 'Prestador' in friendly_name and ('tomador' in col_lower or 'toma' in col_lower or 'dest' in col_lower): continue
-                if 'Tomador' in friendly_name and ('prestador' in col_lower or 'emit' in col_lower): continue
+                if 'Prestador' in friendly_name and ('tomador' in col_lower or 'toma' in col_lower or 'dest' in col_lower): 
+                    continue
+                if 'Tomador' in friendly_name and ('prestador' in col_lower or 'emit' in col_lower): 
+                    continue
                 
-                # Prioriza colunas que não estejam totalmente vazias
+                # Seleciona a coluna e verifica se há dados (evita colunas vazias)
                 current_col = df[col]
                 if found_series is None or (isinstance(found_series, pd.Series) and found_series.isnull().all()):
                     found_series = current_col
@@ -122,7 +124,6 @@ def process_files(uploaded_files):
     for item in all_extracted_data:
         try:
             data_dict = xmltodict.parse(item['content'])
-            # Tratamento para quando o xmltodict retorna múltiplos elementos ou listas
             if isinstance(data_dict, list):
                 for sub_item in data_dict:
                     flat = flatten_dict(sub_item)
