@@ -7,7 +7,7 @@ import zipfile
 # Configuração da Página
 st.set_page_config(page_title="Portal ServTax", layout="wide", page_icon="📑")
 
-# Estilo Rihanna
+# Estilo Rihanna (Rosa e Branco)
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&family=Plus+Jakarta+Sans:wght@400;700&display=swap');
@@ -39,54 +39,51 @@ def flatten_dict(d, parent_key='', sep='_'):
 
 def simplify_and_filter(df):
     """
-    Motor de Possibilidades de Leitura:
-    Varre a lista de tags técnicas para preencher cada coluna do Excel.
+    Motor de Possibilidades: Se não encontrar a tag de SP, busca a Nacional.
+    Preenche a planilha linha a linha independente do município.
     """
     final_df_data = {}
     if 'Arquivo_Origem' in df.columns:
         final_df_data['Arquivo'] = df['Arquivo_Origem']
 
-    # MAPEAMENTO DE POSSIBILIDADES (Equivalências Técnicas)
+    # MAPEAMENTO DE POSSIBILIDADES (Equivalências Técnicas para Coluna B, C, D...)
     mapping = {
-        # Coluna B: Número da Nota (Possibilidades identificadas nos seus arquivos)
         'Nota_Numero': ['nNFSe', 'NumeroNFe', 'nNF', 'numero'],
+        'Data_Emissao': ['dhProc', 'DataEmissaoNFe', 'dhEmi', 'dataemissao', 'DataEmissao'],
         
-        # Data de Emissão
-        'Data_Emissao': ['dhProc', 'DataEmissaoNFe', 'dhEmi', 'DataEmissao'],
+        # PRESTADOR (Busca tags de SP e do Bloco Nacional 'emit')
+        'Prestador_CNPJ': ['emit_CNPJ', 'CPFCNPJPrestador_CNPJ', 'CNPJPrestador', 'emit_CPF'],
+        'Prestador_Razao': ['emit_xNome', 'RazaoSocialPrestador', 'xNomePrestador', 'emit_razao'],
         
-        # Prestador
-        'Prestador_CNPJ': ['emit_CNPJ', 'CPFCNPJPrestador_CNPJ', 'CNPJPrestador'],
-        'Prestador_Razao': ['emit_xNome', 'RazaoSocialPrestador', 'xNomePrestador'],
-        
-        # Tomador
-        'Tomador_CNPJ': ['toma_CNPJ', 'CPFCNPJTomador_CNPJ', 'CPFCNPJTomador_CPF', 'dest_CNPJ'],
+        # TOMADOR (Busca tags de SP e do Bloco Nacional 'toma')
+        'Tomador_CNPJ': ['toma_CNPJ', 'CPFCNPJTomador_CNPJ', 'CPFCNPJTomador_CPF', 'toma_CPF', 'dest_CNPJ'],
         'Tomador_Razao': ['toma_xNome', 'RazaoSocialTomador', 'dest_xNome', 'xNomeTomador'],
         
-        # Valores
+        # VALORES (vServ no Nacional / ValorServicos em SP)
         'Vlr_Bruto': ['vServ', 'ValorServicos', 'vNF', 'v_serv', 'vServPrest_vServ'],
         
-        # Impostos
-        'ISS_Valor': ['vISSRet', 'ValorISS', 'vISSQN', 'ValorISS_Retido'],
+        # IMPOSTOS
+        'ISS_Valor': ['vISSRet', 'ValorISS', 'vISSQN', 'ValorISS_Retido', 'vISS'],
         'PIS_Retido': ['vPIS', 'ValorPIS', 'pis_retido'],
         'COFINS_Retido': ['vCOFINS', 'ValorCOFINS', 'cofins_retido'],
         'IRRF_Retido': ['vIR', 'ValorIR', 'ir_retido'],
         'CSLL_Retido': ['vCSLL', 'ValorCSLL', 'csll_retido'],
         
-        # Descrição
+        # DESCRIÇÃO (xDescServ no Nacional / Discriminacao em SP)
         'Servico_Descricao': ['xDescServ', 'Discriminacao', 'xServ', 'infCpl', 'xProd']
     }
 
     for friendly_name, tags in mapping.items():
         found_series = None
         for col in df.columns:
-            # Verifica se a coluna termina com uma das tags técnicas mapeadas
-            if any(col.endswith(tag) for tag in tags):
+            # Verifica se o final da coluna bate com alguma das tags técnicas (ignora maiúsculas)
+            if any(col.lower().endswith(t.lower()) for t in tags):
                 # Proteção para não misturar Prestador com Tomador
-                if 'Prestador' in friendly_name and ('Tomador' in col or 'toma' in col or 'dest' in col): continue
-                if 'Tomador' in friendly_name and ('Prestador' in col or 'emit' in col): continue
+                if 'Prestador' in friendly_name and ('tomador' in col.lower() or 'toma' in col.lower() or 'dest' in col.lower()): continue
+                if 'Tomador' in friendly_name and ('prestador' in col.lower() or 'emit' in col.lower()): continue
                 
-                # Se encontrar a coluna, verifica se ela tem dados válidos
                 current_series = df[col]
+                # Só preenche se encontrar dados reais
                 if found_series is None or (isinstance(found_series, pd.Series) and found_series.isnull().all()):
                     found_series = current_series
 
@@ -94,9 +91,9 @@ def simplify_and_filter(df):
             if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL']):
                 final_df_data[friendly_name] = pd.to_numeric(found_series, errors='coerce').fillna(0.0)
             else:
-                final_df_data[friendly_name] = found_series.fillna("Não Localizado")
+                final_df_data[friendly_name] = found_series.fillna("Não Identificado")
         else:
-            final_df_data[friendly_name] = 0.0 if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL']) else "Não Localizado"
+            final_df_data[friendly_name] = 0.0 if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL']) else "NÃO LOCALIZADO"
 
     return pd.DataFrame(final_df_data)
 
@@ -139,18 +136,18 @@ def process_files(uploaded_files):
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria Fiscal: Mapeamento de Múltiplas Tags")
+    st.subheader("Auditoria Fiscal: Mapeamento de Todos os Municípios")
 
     uploaded_files = st.file_uploader("Upload de XML ou ZIP", type=["xml", "zip"], accept_multiple_files=True)
 
     if uploaded_files:
-        with st.spinner('Processando possibilidades de leitura...'):
+        with st.spinner('Consolidando layouts SP e Nacional...'):
             df_raw = process_files(uploaded_files)
         
         if not df_raw.empty:
             df_final = simplify_and_filter(df_raw)
 
-            st.success(f"Total de {len(df_final)} notas processadas.")
+            st.success(f"Notas processadas: {len(df_final)}")
             st.dataframe(df_final)
 
             output = io.BytesIO()
@@ -164,7 +161,7 @@ def main():
                     worksheet.set_column(i, i, 25)
 
             st.download_button(
-                label="📥 Baixar Excel de Auditoria",
+                label="📥 Baixar Excel de Auditoria Completo",
                 data=output.getvalue(),
                 file_name="portal_servtax_auditoria.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
