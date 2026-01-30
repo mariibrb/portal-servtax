@@ -21,10 +21,11 @@ st.markdown("""
 
 def get_xml_value(root, tags):
     """
-    Busca profunda em cascata: tenta cada tag da lista até encontrar o valor.
+    Busca em Cascata com XPath: tenta cada tag da lista em qualquer nível do XML.
     """
     for tag in tags:
-        # Busca ignorando namespaces para compatibilidade universal
+        # O prefixo .// permite encontrar a tag em qualquer profundidade
+        # O prefixo {*} ignora namespaces (como ns2:, x:, etc)
         element = root.find(f".//{{*}}{tag}")
         if element is None:
             element = root.find(f".//{tag}")
@@ -38,7 +39,7 @@ def process_xml_file(content, filename):
         tree = ET.parse(io.BytesIO(content))
         root = tree.getroot()
         
-        # MAPEAMENTO DE POSSIBILIDADES (Ajuste Fino SP & Nacional)
+        # MAPEAMENTO DE POSSIBILIDADES (Cascata de Tags para centenas de prefeituras)
         row = {
             'Arquivo': filename,
             'Municipio': get_xml_value(root, ['xLocEmi', 'NomeCidade', 'Cidade', 'xMun']),
@@ -49,8 +50,8 @@ def process_xml_file(content, filename):
             # Data de Emissão
             'Data_Emissao': get_xml_value(root, ['dhProc', 'dhEmi', 'DataEmissaoNFe', 'DataEmissao', 'dtEmi']),
             
-            # PRESTADOR (Ajuste Fino: RazaoSocialPrestador para SP e xNome para Nacional)
-            'Prestador_CNPJ': get_xml_value(root, ['emit/CNPJ', 'CPFCNPJPrestador/CNPJ', 'CNPJPrestador', 'emit_CNPJ']),
+            # PRESTADOR
+            'Prestador_CNPJ': get_xml_value(root, ['emit/CNPJ', 'CPFCNPJPrestador/CNPJ', 'CNPJPrestador', 'emit_CNPJ', 'CNPJ']),
             'Prestador_Razao': get_xml_value(root, ['RazaoSocialPrestador', 'emit/xNome', 'xNomePrestador', 'emit_xNome', 'RazaoSocial']),
             
             # TOMADOR
@@ -74,7 +75,7 @@ def process_xml_file(content, filename):
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria Fiscal Multi-Prefeituras (Versão Final Ajustada)")
+    st.subheader("Auditoria Fiscal Multi-Prefeituras (Motor de Busca em Cascata)")
 
     uploaded_files = st.file_uploader("Upload de XML ou ZIP", type=["xml", "zip"], accept_multiple_files=True)
 
@@ -94,7 +95,7 @@ def main():
         if data_rows:
             df = pd.DataFrame(data_rows)
             
-            # Conversão de valores financeiros para cálculo e exibição correta
+            # Conversão de valores financeiros para Excel
             cols_fin = ['Vlr_Bruto', 'ISS_Retido', 'PIS', 'COFINS']
             for col in cols_fin:
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
@@ -102,7 +103,6 @@ def main():
             st.success(f"Notas processadas com sucesso: {len(df)}")
             st.dataframe(df)
 
-            # Exportação Excel
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                 df.to_excel(writer, index=False, sheet_name='PortalServTax')
@@ -114,11 +114,13 @@ def main():
                     worksheet.set_column(i, i, 22)
 
             st.download_button(
-                label="📥 Baixar Planilha de Auditoria Final",
+                label="📥 Baixar Planilha de Auditoria",
                 data=output.getvalue(),
                 file_name="portal_servtax_auditoria.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
+        else:
+            st.error("Nenhum dado capturado nos ficheiros.")
 
 if __name__ == "__main__":
     main()
