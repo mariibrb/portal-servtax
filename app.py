@@ -21,6 +21,8 @@ st.markdown("""
 
 def flatten_dict(d, parent_key='', sep='_'):
     items = []
+    if not isinstance(d, dict):
+        return {}
     for k, v in d.items():
         clean_k = k.split(':')[-1] if ':' in k else k
         new_key = f"{parent_key}{sep}{clean_k}" if parent_key else clean_k
@@ -38,69 +40,62 @@ def flatten_dict(d, parent_key='', sep='_'):
 
 def simplify_and_filter(df):
     """
-    Filtro de busca profunda: varre o DataFrame procurando padrões de fim de tag (sufixos)
-    para garantir que nenhum campo essencial fique como None.
+    Filtro de busca profunda corrigido para evitar ValueError e capturar campos críticos.
     """
     final_df_data = {}
     if 'Arquivo_Origem' in df.columns:
         final_df_data['Arquivo'] = df['Arquivo_Origem']
 
-    # Definição de busca por sufixos e contextos
-    # O código vai procurar: 'Algum radical no nome da coluna' AND 'Deve conter termo X' AND 'Não deve conter termo Y'
+    # Configuração de alvos com sufixos e contextos
     targets = {
-        'Nota_Numero': {'rads': ['numero', 'nnfse', 'numnf', 'nfnr'], 'must': [], 'not': []},
-        'Data_Emissao': {'rads': ['dataemissao', 'dtemic', 'dtrem', 'dhemi', 'dtaemi', 'datahora'], 'must': [], 'not': []},
-        
-        'Prestador_CNPJ': {'rads': ['cnpj', 'cpfcnpj'], 'must': ['prestador'], 'not': ['tomador', 'intermediario']},
+        'Nota_Numero': {'rads': ['numero', 'nnfse', 'numnf', 'nfnr', 'notafiscal'], 'must': [], 'not': []},
+        'Data_Emissao': {'rads': ['dataemissao', 'dtemic', 'dtrem', 'dhemi', 'dtaemi', 'datahora', 'dh_emi'], 'must': [], 'not': []},
+        'Prestador_CNPJ': {'rads': ['cnpj', 'cpfcnpj', 'cpf_cnpj'], 'must': ['prestador'], 'not': ['tomador', 'intermediario']},
         'Prestador_Razao': {'rads': ['razaosocial', 'xnome', 'razao', 'nome'], 'must': ['prestador'], 'not': ['tomador', 'intermediario', 'endereco']},
-        
-        'Tomador_CNPJ': {'rads': ['cnpj', 'cpfcnpj'], 'must': ['tomador'], 'not': ['prestador', 'intermediario']},
+        'Tomador_CNPJ': {'rads': ['cnpj', 'cpfcnpj', 'cpf_cnpj'], 'must': ['tomador'], 'not': ['prestador', 'intermediario']},
         'Tomador_Razao': {'rads': ['razaosocial', 'xnome', 'razao', 'nome'], 'must': ['tomador'], 'not': ['prestador', 'intermediario', 'endereco']},
-        
-        'Vlr_Bruto': {'rads': ['valorservicos', 'vserv', 'vlrserv', 'valorbruto', 'vlrbruto'], 'must': [], 'not': ['retido', 'liquido']},
+        'Vlr_Bruto': {'rads': ['valorservicos', 'vserv', 'vlrserv', 'valorbruto', 'vlrbruto', 'v_serv'], 'must': [], 'not': ['retido', 'liquido']},
         'ISS_Retido': {'rads': ['issretido', 'vissret', 'iss_retido', 'valoriss'], 'must': ['retido'], 'not': []},
         'PIS_Retido': {'rads': ['pisretido', 'vpisret', 'pis_retido', 'valorpis'], 'must': ['retido'], 'not': []},
         'COFINS_Retido': {'rads': ['cofinsretido', 'vcofinsret', 'cofins_retido', 'valorcofins'], 'must': ['retido'], 'not': []},
-        'IRRF_Retido': {'rads': ['valorir', 'vir', 'irrf_retido', 'virrf'], 'must': ['retido'], 'not': []},
-        'CSLL_Retido': {'rads': ['valorcsll', 'vcsll', 'csll_retido'], 'must': ['retido'], 'not': []},
-        
-        'Servico_Descricao': {'rads': ['discriminacao', 'xserv', 'infadic', 'desc_serv', 'itemlistaservico'], 'must': [], 'not': ['prestador', 'tomador']}
+        'IRRF_Retido': {'rads': ['valorir', 'vir', 'irrf_retido', 'virrf', 'v_ir'], 'must': ['retido'], 'not': []},
+        'CSLL_Retido': {'rads': ['valorcsll', 'vcsll', 'csll_retido', 'v_csll'], 'must': ['retido'], 'not': []},
+        'Servico_Descricao': {'rads': ['discriminacao', 'xserv', 'infadic', 'desc_serv', 'discriminacao'], 'must': [], 'not': ['prestador', 'tomador']}
     }
 
     for friendly_name, rules in targets.items():
-        found_val = None
+        found_series = None
         for col in df.columns:
             c_low = col.lower()
-            # 1. Verifica se tem algum dos radicais
             if any(r in c_low for r in rules['rads']):
-                # 2. Verifica se atende aos critérios de inclusão (ex: tem que ter 'prestador')
                 if all(m in c_low for m in rules['must']):
-                    # 3. Verifica se atende aos critérios de exclusão (ex: não pode ter 'endereco')
                     if not any(n in c_low for n in rules['not'] + ['endereco', 'logradouro', 'uf', 'cep', 'bairro']):
-                        # Priorizamos colunas que não estejam vazias (NaN)
-                        if found_val is None or pd.isna(found_val):
-                             found_val = df[col]
+                        # Se já encontramos uma coluna, mas ela está cheia de nulos, tentamos a próxima
+                        if found_series is None or found_series.isnull().all():
+                            found_series = df[col]
         
-        if found_val is not None:
-            # Tratamento numérico para impostos e valores
+        if found_series is not None:
             if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL']):
-                final_df_data[friendly_name] = pd.to_numeric(found_val, errors='coerce').fillna(0.0)
+                final_df_data[friendly_name] = pd.to_numeric(found_series, errors='coerce').fillna(0.0)
             else:
-                final_df_data[friendly_name] = found_val.fillna("Não Identificado")
+                final_df_data[friendly_name] = found_series.fillna("Não Identificado")
         else:
-            final_df_data[friendly_name] = 0.0 if 'Vlr' in friendly_name or 'Retido' in friendly_name else "Não Localizado"
+            final_df_data[friendly_name] = 0.0 if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL']) else "Não Localizado"
 
     return pd.DataFrame(final_df_data)
 
 def extract_xml_from_zip(zip_data, extracted_list):
-    with zipfile.ZipFile(io.BytesIO(zip_data)) as z:
-        for file_info in z.infolist():
-            if file_info.filename.lower().endswith('.xml'):
-                with z.open(file_info.filename) as xml_file:
-                    extracted_list.append({'name': file_info.filename, 'content': xml_file.read()})
-            elif file_info.filename.lower().endswith('.zip'):
-                with z.open(file_info.filename) as inner_zip:
-                    extract_xml_from_zip(inner_zip.read(), extracted_list)
+    try:
+        with zipfile.ZipFile(io.BytesIO(zip_data)) as z:
+            for file_info in z.infolist():
+                if file_info.filename.lower().endswith('.xml'):
+                    with z.open(file_info.filename) as xml_file:
+                        extracted_list.append({'name': file_info.filename, 'content': xml_file.read()})
+                elif file_info.filename.lower().endswith('.zip'):
+                    with z.open(file_info.filename) as inner_zip:
+                        extract_xml_from_zip(inner_zip.read(), extracted_list)
+    except:
+        pass
 
 def process_files(uploaded_files):
     xml_contents = []
@@ -115,21 +110,28 @@ def process_files(uploaded_files):
     for xml_item in xml_contents:
         try:
             data_dict = xmltodict.parse(xml_item['content'])
-            flat_data = flatten_dict(data_dict)
-            flat_data['Arquivo_Origem'] = xml_item['name']
-            extracted_data.append(flat_data)
+            # O xmltodict pode retornar uma lista se houver múltiplos nós raiz, tratamos isso
+            if isinstance(data_dict, list):
+                for item in data_dict:
+                    flat = flatten_dict(item)
+                    flat['Arquivo_Origem'] = xml_item['name']
+                    extracted_data.append(flat)
+            else:
+                flat_data = flatten_dict(data_dict)
+                flat_data['Arquivo_Origem'] = xml_item['name']
+                extracted_data.append(flat_data)
         except:
             continue
     return pd.DataFrame(extracted_data)
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria Fiscal: Motor de Busca Profunda (Anti-None)")
+    st.subheader("Auditoria Fiscal: Mapeamento Resiliente")
 
     uploaded_files = st.file_uploader("Upload de XML ou ZIP", type=["xml", "zip"], accept_multiple_files=True)
 
     if uploaded_files:
-        with st.spinner('Escaneando camadas do XML para encontrar dados perdidos...'):
+        with st.spinner('Processando dados e corrigindo ambiguidades...'):
             df_raw = process_files(uploaded_files)
         
         if not df_raw.empty:
@@ -137,25 +139,23 @@ def main():
 
             st.success(f"Notas processadas: {len(df_final)}")
             
-            st.write("### Conferência de Auditoria")
+            st.write("### Tabela de Conferência")
             st.dataframe(df_final)
 
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                 df_final.to_excel(writer, index=False, sheet_name='Auditoria')
-                
                 workbook = writer.book
                 worksheet = writer.sheets['Auditoria']
-                header_fmt = workbook.add_format({'bold': True, 'bg_color': '#FF69B4', 'font_color': 'white', 'border': 1})
-                
+                header_fmt = workbook.add_format({'bold': True, 'bg_color': '#FF69B4', 'font_color': 'white'})
                 for i, col in enumerate(df_final.columns):
                     worksheet.write(0, i, col, header_fmt)
                     worksheet.set_column(i, i, 20)
 
             st.download_button(
-                label="📥 Baixar Excel Sem Erros",
+                label="📥 Baixar Excel Corrigido",
                 data=output.getvalue(),
-                file_name="portal_servtax_final.xlsx",
+                file_name="portal_servtax_auditoria.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
