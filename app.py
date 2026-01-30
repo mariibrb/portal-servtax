@@ -38,54 +38,49 @@ def flatten_dict(d, parent_key='', sep='_'):
 
 def simplify_and_filter(df):
     """
-    Filtra apenas as colunas essenciais de auditoria e simplifica os nomes
-    evitando tags de endereço e burocracias.
+    Filtra colunas essenciais usando busca por radical para evitar valores 'None'.
     """
-    # 1. Mapeamento de tags essenciais (Alvos principais)
-    targets = {
-        'Numero': 'Nota_Numero',
-        'DataEmissao': 'Data_Emissao',
-        'CpfCnpj': 'CNPJ', # Será tratado para Prestador/Tomador
-        'RazaoSocial': 'Razao_Social',
-        'ValorServicos': 'Vlr_Bruto',
-        'ValorLiquido': 'Vlr_Liquido',
-        'ValorIss': 'ISS',
-        'ValorPis': 'PIS',
-        'ValorCofins': 'COFINS',
-        'ValorIr': 'IRRF',
-        'ValorCsll': 'CSLL',
-        'OutrasRetencoes': 'Outras_Ret',
-        'IBS_Valor': 'IBS',
-        'CBS_Valor': 'CBS',
-        'NBS': 'NBS',
-        'Cclass': 'Cclass',
-        'Discriminacao': 'Servico_Descricao'
+    # Mapeamento por radicais (mais chance de acerto em diferentes padrões de prefeitura)
+    mapping = {
+        'Nota_Numero': ['numero', 'nfnr', 'numnf'],
+        'Data_Emissao': ['dataemissao', 'dtemic', 'dtrem'],
+        'Prestador_CNPJ': ['prestador_cnpj', 'prestador_cpfcnpj', 'prestador_identificacao'],
+        'Prestador_Razao': ['prestador_razãosocial', 'prestador_xnome'],
+        'Tomador_CNPJ': ['tomador_cnpj', 'tomador_cpfcnpj', 'tomador_identificacao'],
+        'Tomador_Razao': ['tomador_razãosocial', 'tomador_xnome'],
+        'Vlr_Bruto': ['valorservicos', 'vserv', 'vlrserv'],
+        'Vlr_Liquido': ['valorliquido', 'vliq'],
+        'ISS': ['valoriss', 'viss'],
+        'PIS': ['valorpis', 'vpis'],
+        'COFINS': ['valorcofins', 'vcofins'],
+        'IRRF': ['valorir', 'vir'],
+        'CSLL': ['valorcsll', 'vcsll'],
+        'IBS': ['ibs_vlr', 'ibs_valor'],
+        'CBS': ['cbs_vlr', 'cbs_valor'],
+        'Servico_Descricao': ['discriminacao', 'xserv', 'infadic']
     }
 
-    final_data = {}
-    cols = df.columns
-    
-    # Sempre incluir a origem
-    if 'Arquivo_Origem' in cols:
-        final_data['Arquivo'] = df['Arquivo_Origem']
+    final_df_data = {}
+    if 'Arquivo_Origem' in df.columns:
+        final_df_data['Arquivo'] = df['Arquivo_Origem']
 
-    for orig_col in cols:
-        for tag, simple_name in targets.items():
-            if tag.lower() in orig_col.lower():
-                # Bloqueio de endereços e IBGE
-                if any(x in orig_col.lower() for x in ['endereco', 'logradouro', 'complemento', 'bairro', 'ibge', 'uf', 'cep']):
-                    continue
-                
-                # Identifica se é Prestador ou Tomador para o CNPJ e Razão
-                name = simple_name
-                if 'prestador' in orig_col.lower():
-                    name = f"Prestador_{simple_name}"
-                elif 'tomador' in orig_col.lower():
-                    name = f"Tomador_{simple_name}"
-                
-                final_data[name] = df[orig_col]
+    # Para cada coluna que desejamos no Excel final
+    for friendly_name, radicals in mapping.items():
+        # Procura nas colunas reais do DataFrame por algum radical
+        found_col = None
+        for col in df.columns:
+            if any(rad in col.lower() for rad in radicals):
+                # Bloqueio de endereços para não pegar CNPJ de endereço por erro
+                if not any(x in col.lower() for x in ['endereco', 'logradouro', 'uf', 'cep']):
+                    found_col = col
+                    break
+        
+        if found_col:
+            final_df_data[friendly_name] = df[found_col]
+        else:
+            final_df_data[friendly_name] = "Não encontrado"
 
-    return pd.DataFrame(final_data)
+    return pd.DataFrame(final_df_data)
 
 def extract_xml_from_zip(zip_data, extracted_list):
     with zipfile.ZipFile(io.BytesIO(zip_data)) as z:
@@ -119,41 +114,35 @@ def process_files(uploaded_files):
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria Fiscal Direta (Sem Burocracia)")
+    st.subheader("Auditoria Fiscal: Captura Inteligente de Dados")
 
-    uploaded_files = st.file_uploader("Arraste seus XMLs ou ZIPs aqui", type=["xml", "zip"], accept_multiple_files=True)
+    uploaded_files = st.file_uploader("Suba seus XMLs ou ZIPs", type=["xml", "zip"], accept_multiple_files=True)
 
     if uploaded_files:
-        with st.spinner('Filtrando apenas o essencial...'):
+        with st.spinner('Mapeando tags fiscais...'):
             df_raw = process_files(uploaded_files)
         
         if not df_raw.empty:
-            # Aplica o filtro rígido de colunas
             df_final = simplify_and_filter(df_raw)
 
-            st.success(f"Notas processadas: {len(df_final)}. Colunas reduzidas para o essencial.")
+            st.success(f"Notas processadas: {len(df_final)}")
             
-            st.write("### Tabela de Conferência")
+            # Mostra o resultado final
+            st.write("### Dados para Conferência")
             st.dataframe(df_final)
 
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                df_final.to_excel(writer, index=False, sheet_name='Auditoria_Limpa')
-                
-                workbook = writer.book
-                worksheet = writer.sheets['Auditoria_Limpa']
-                for i, col in enumerate(df_final.columns):
-                    column_len = max(df_final[col].astype(str).str.len().max(), len(col)) + 2
-                    worksheet.set_column(i, i, min(column_len, 50))
-
+                df_final.to_excel(writer, index=False, sheet_name='PortalServTax')
+            
             st.download_button(
-                label="📥 Baixar Excel de Auditoria",
+                label="📥 Baixar Planilha de Auditoria",
                 data=output.getvalue(),
-                file_name="auditoria_servtax_objetivo.xlsx",
+                file_name="auditoria_portal_servtax.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            st.warning("Nenhum dado válido encontrado.")
+            st.warning("Nenhum arquivo XML detectado.")
 
 if __name__ == "__main__":
     main()
