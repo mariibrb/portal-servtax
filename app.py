@@ -40,7 +40,7 @@ def process_xml_file(content, filename):
         tree = ET.parse(io.BytesIO(content))
         root = tree.getroot()
         
-        # MAPEAMENTO DE POSSIBILIDADES (Ajuste Fino: Razão Social)
+        # MAPEAMENTO DE POSSIBILIDADES (Ajuste Fino: Inclusão de CNPJ e Razão Social)
         row = {
             'Arquivo': filename,
             
@@ -50,12 +50,12 @@ def process_xml_file(content, filename):
             # Data de Emissão
             'Data_Emissao': get_xml_value(root, ['dhProc', 'dhEmi', 'DataEmissaoNFe', 'DataEmissao']),
             
-            # PRESTADOR (Razão Social - Possibilidades SP e Nacional)
-            'Prestador_CNPJ': get_xml_value(root, ['emit/CNPJ', 'CPFCNPJPrestador/CNPJ', 'CNPJPrestador', 'emit_CNPJ']),
+            # PRESTADOR (Tags para CNPJ e Razão Social - SP e Nacional)
+            'Prestador_CNPJ': get_xml_value(root, ['emit/CNPJ', 'CPFCNPJPrestador/CNPJ', 'CNPJPrestador', 'emit_CNPJ', 'CPFCNPJPrestador/CPF']),
             'Prestador_Razao': get_xml_value(root, ['RazaoSocialPrestador', 'emit/xNome', 'xNomePrestador', 'emit_xNome', 'RazaoSocial']),
             
-            # TOMADOR (Razão Social - Possibilidades SP e Nacional)
-            'Tomador_CNPJ': get_xml_value(root, ['toma/CNPJ', 'CPFCNPJTomador/CNPJ', 'CPFCNPJTomador/CPF', 'dest/CNPJ', 'CNPJTomador']),
+            # TOMADOR (Tags para CNPJ e Razão Social - SP e Nacional)
+            'Tomador_CNPJ': get_xml_value(root, ['toma/CNPJ', 'CPFCNPJTomador/CNPJ', 'CPFCNPJTomador/CPF', 'dest/CNPJ', 'CNPJTomador', 'toma/CPF']),
             'Tomador_Razao': get_xml_value(root, ['toma/xNome', 'RazaoSocialTomador', 'dest/xNome', 'xNomeTomador', 'RazaoSocialTomador']),
             
             # Valores e Impostos
