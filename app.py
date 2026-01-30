@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-import xmltodict
+import xml.etree.ElementTree as ET
 import io
 import zipfile
 
@@ -19,152 +19,118 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-def flatten_dict(d, parent_key='', sep='_'):
-    items = []
-    if not isinstance(d, dict): return {}
-    for k, v in d.items():
-        clean_k = k.split(':')[-1] if ':' in k else k
-        new_key = f"{parent_key}{sep}{clean_k}" if parent_key else clean_k
-        if isinstance(v, dict):
-            items.extend(flatten_dict(v, new_key, sep=sep).items())
-        elif isinstance(v, list):
-            for i, item in enumerate(v):
-                if isinstance(item, dict):
-                    items.extend(flatten_dict(item, f"{new_key}_{i}", sep=sep).items())
-                else:
-                    items.append((f"{new_key}_{i}", item))
-        else:
-            items.append((new_key, v))
-    return dict(items)
-
-def simplify_and_filter(df):
+def get_xml_value(root, tags):
     """
-    Motor de Possibilidades: Varre as tags técnicas de SP e Nacional (DPS)
-    para garantir o preenchimento total da planilha linha a linha.
+    Busca profunda: tenta encontrar o valor em qualquer uma das tags da lista,
+    ignorando namespaces e caminhos complexos.
     """
-    final_df_data = {}
-    if 'Arquivo_Origem' in df.columns:
-        final_df_data['Arquivo'] = df['Arquivo_Origem']
-
-    # MAPEAMENTO DE POSSIBILIDADES (Onde o código testa as tags dos seus XMLs)
-    mapping = {
-        'Nota_Numero': ['nNFSe', 'NumeroNFe', 'nNF', 'numero'],
-        'Data_Emissao': ['dhEmi', 'DataEmissaoNFe', 'dhProc', 'DataEmissao', 'dEmi'],
+    for tag in tags:
+        # Busca em qualquer nível do XML (.//) ignorando namespace ({*})
+        element = root.find(f".//{{*}}{tag}")
+        if element is None:
+            # Tenta busca simples sem namespace
+            element = root.find(f".//{tag}")
         
-        # PRESTADOR
-        'Prestador_CNPJ': ['emit_CNPJ', 'CPFCNPJPrestador_CNPJ', 'CNPJPrestador', 'emit_CPF'],
-        'Prestador_Razao': ['emit_xNome', 'RazaoSocialPrestador', 'xNomePrestador', 'emit_razao'],
-        
-        # TOMADOR
-        'Tomador_CNPJ': ['toma_CNPJ', 'CPFCNPJTomador_CNPJ', 'CPFCNPJTomador_CPF', 'toma_CPF', 'dest_CNPJ'],
-        'Tomador_Razao': ['toma_xNome', 'RazaoSocialTomador', 'dest_xNome', 'xNomeTomador'],
-        
-        # VALORES
-        'Vlr_Bruto': ['vServ', 'ValorServicos', 'vNF', 'v_serv', 'vServPrest_vServ'],
-        
-        # IMPOSTOS
-        'ISS_Valor': ['vISSQN', 'ValorISS', 'vISSRet', 'ValorISS_Retido', 'vISS'],
-        'PIS_Retido': ['vPIS', 'ValorPIS', 'pis_retido', 'vPIS_Ret'],
-        'COFINS_Retido': ['vCOFINS', 'ValorCOFINS', 'cofins_retido', 'vCOFINS_Ret'],
-        'IRRF_Retido': ['vIR', 'ValorIR', 'ir_retido', 'vIR_Ret'],
-        'CSLL_Retido': ['vCSLL', 'ValorCSLL', 'csll_retido', 'vCSLL_Ret'],
-        
-        # DESCRIÇÃO
-        'Servico_Descricao': ['xDescServ', 'Discriminacao', 'xServ', 'infCpl', 'xProd']
-    }
+        if element is not None and element.text:
+            return element.text
+    return ""
 
-    for friendly_name, tags in mapping.items():
-        found_series = None
-        for col in df.columns:
-            # Verifica se a coluna termina com a tag técnica ignorando maiúsculas
-            if any(col.lower().endswith(t.lower()) for t in tags):
-                # Filtro de Contexto: Prestador não lê Tomador e vice-versa
-                if 'Prestador' in friendly_name and ('tomador' in col.lower() or 'toma' in col.lower() or 'dest' in col.lower()): continue
-                if 'Tomador' in friendly_name and ('prestador' in col.lower() or 'emit' in col.lower()): continue
-                
-                current_series = df[col]
-                # Pega a primeira coluna que contiver dados reais
-                if found_series is None or (isinstance(found_series, pd.Series) and found_series.isnull().all()):
-                    found_series = current_series
-
-        if found_series is not None:
-            if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL']):
-                final_df_data[friendly_name] = pd.to_numeric(found_series, errors='coerce').fillna(0.0)
-            else:
-                final_df_data[friendly_name] = found_series.fillna("")
-        else:
-            final_df_data[friendly_name] = 0.0 if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL']) else ""
-
-    return pd.DataFrame(final_df_data)
-
-def extract_xml_from_zip(zip_data, extracted_list):
+def process_xml_file(content, filename):
     try:
-        with zipfile.ZipFile(io.BytesIO(zip_data)) as z:
-            for file_info in z.infolist():
-                if file_info.filename.lower().endswith('.xml'):
-                    with z.open(file_info.filename) as xml_file:
-                        extracted_list.append({'name': file_info.filename, 'content': xml_file.read()})
-                elif file_info.filename.lower().endswith('.zip'):
-                    with z.open(file_info.filename) as inner_zip:
-                        extract_xml_from_zip(inner_zip.read(), extracted_list)
-    except: pass
-
-def process_files(uploaded_files):
-    all_data = []
-    for uploaded_file in uploaded_files:
-        content = uploaded_file.read()
-        if uploaded_file.name.lower().endswith('.xml'):
-            all_data.append({'name': uploaded_file.name, 'content': content})
-        elif uploaded_file.name.lower().endswith('.zip'):
-            extract_xml_from_zip(content, all_data)
+        tree = ET.parse(io.BytesIO(content))
+        root = tree.getroot()
+        
+        # MAPEAMENTO MULTI-PREFEITURA (Dicionário de Possibilidades)
+        # Se entrar uma prefeitura nova, basta adicionar a tag técnica na lista correspondente.
+        row = {
+            'Arquivo': filename,
+            'Municipio': get_xml_value(root, ['xLocEmi', 'NomeCidade', 'Cidade']),
             
-    final_rows = []
-    for item in all_data:
-        try:
-            data_dict = xmltodict.parse(item['content'])
-            # Normalização de Nó: Entra direto na estrutura útil do XML
-            if isinstance(data_dict, dict):
-                root = list(data_dict.keys())[0]
-                flat = flatten_dict(data_dict[root])
-                flat['Arquivo_Origem'] = item['name']
-                final_rows.append(flat)
-        except: continue
-    return pd.DataFrame(final_rows)
+            # Número da Nota
+            'Nota_Numero': get_xml_value(root, ['nNFSe', 'NumeroNFe', 'nNF', 'numero', 'Numero']),
+            
+            # Data de Emissão
+            'Data_Emissao': get_xml_value(root, ['dhProc', 'dhEmi', 'DataEmissaoNFe', 'DataEmissao', 'dtEmi']),
+            
+            # Prestador (Emitente)
+            'Prestador_CNPJ': get_xml_value(root, ['emit/CNPJ', 'emit_CNPJ', 'CPFCNPJPrestador/CNPJ', 'CNPJPrestador', 'CNPJ']),
+            'Prestador_Razao': get_xml_value(root, ['emit/xNome', 'emit_xNome', 'RazaoSocialPrestador', 'xNomePrestador', 'RazaoSocial']),
+            
+            # Tomador (Destinatário)
+            'Tomador_CNPJ': get_value_nested(root, 'toma', 'CNPJ') or get_xml_value(root, ['CPFCNPJTomador/CNPJ', 'CPFCNPJTomador/CPF', 'dest/CNPJ', 'CNPJTomador']),
+            'Tomador_Razao': get_value_nested(root, 'toma', 'xNome') or get_xml_value(root, ['RazaoSocialTomador', 'dest/xNome', 'xNomeTomador', 'RazaoSocialTomador']),
+            
+            # Valores
+            'Vlr_Bruto': get_xml_value(root, ['vServ', 'ValorServicos', 'vNF', 'vServPrest/vServ', 'ValorTotal']),
+            'ISS_Retido': get_xml_value(root, ['vISSRet', 'ValorISS', 'vISSQN', 'ValorISS_Retido', 'ISSRetido']),
+            
+            # Impostos Federais
+            'PIS': get_xml_value(root, ['vPIS', 'ValorPIS', 'vPIS_Ret', 'PISRetido']),
+            'COFINS': get_xml_value(root, ['vCOFINS', 'ValorCOFINS', 'vCOFINS_Ret', 'COFINSRetido']),
+            
+            # Descrição do Serviço
+            'Descricao': get_xml_value(root, ['xDescServ', 'Discriminacao', 'xServ', 'infCpl', 'xProd'])
+        }
+        return row
+    except:
+        return None
+
+def get_value_nested(root, parent_tag, child_tag):
+    """Auxiliar para buscar tags dentro de blocos específicos como <toma><CNPJ>"""
+    parent = root.find(f".//{{*}}{parent_tag}")
+    if parent is not None:
+        child = parent.find(f".//{{*}}{child_tag}")
+        if child is not None and child.text:
+            return child.text
+    return None
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria Fiscal: Motor Unificado de Tags")
+    st.subheader("Auditoria Fiscal Multi-Prefeituras (Mapeamento Universal)")
 
     uploaded_files = st.file_uploader("Upload de XML ou ZIP", type=["xml", "zip"], accept_multiple_files=True)
 
     if uploaded_files:
-        with st.spinner('A processar equivalências SP & Nacional...'):
-            df_raw = process_files(uploaded_files)
-        
-        if not df_raw.empty:
-            df_final = simplify_and_filter(df_raw)
+        data_rows = []
+        for uploaded_file in uploaded_files:
+            if uploaded_file.name.endswith('.zip'):
+                with zipfile.ZipFile(uploaded_file) as z:
+                    for xml_name in z.namelist():
+                        if xml_name.endswith('.xml'):
+                            res = process_xml_file(z.read(xml_name), xml_name)
+                            if res: data_rows.append(res)
+            else:
+                res = process_xml_file(uploaded_file.read(), uploaded_file.name)
+                if res: data_rows.append(res)
 
-            st.success(f"Concluído! {len(df_final)} notas processadas.")
-            st.dataframe(df_final)
+        if data_rows:
+            df = pd.DataFrame(data_rows)
+            
+            # Conversão de valores financeiros
+            cols_fin = ['Vlr_Bruto', 'ISS_Retido', 'PIS', 'COFINS']
+            for col in cols_fin:
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
 
+            st.success(f"Notas processadas com sucesso: {len(df)}")
+            st.dataframe(df)
+
+            # Exportação Excel
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                df_final.to_excel(writer, index=False, sheet_name='PortalServTax')
+                df.to_excel(writer, index=False, sheet_name='PortalServTax')
                 workbook = writer.book
                 worksheet = writer.sheets['PortalServTax']
                 header_fmt = workbook.add_format({'bold': True, 'bg_color': '#FF69B4', 'font_color': 'white', 'border': 1})
-                for i, col in enumerate(df_final.columns):
+                for i, col in enumerate(df.columns):
                     worksheet.write(0, i, col, header_fmt)
-                    worksheet.set_column(i, i, 25)
+                    worksheet.set_column(i, i, 22)
 
             st.download_button(
-                label="📥 Baixar Excel de Auditoria Completo",
+                label="📥 Baixar Planilha de Auditoria Unificada",
                 data=output.getvalue(),
-                file_name="auditoria_servtax_completa.xlsx",
+                file_name="portal_servtax_auditoria.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-        else:
-            st.warning("Nenhum dado encontrado nos arquivos.")
 
 if __name__ == "__main__":
     main()
