@@ -22,11 +22,9 @@ st.markdown("""
 def get_xml_value(root, tags):
     """
     Busca em Cascata com XPath: tenta cada tag da lista em qualquer nível do XML.
-    Ignora namespaces para garantir leitura universal.
+    Ignora namespaces para garantir leitura universal de centenas de prefeituras.
     """
     for tag in tags:
-        # O prefixo .// permite encontrar a tag em qualquer profundidade
-        # O prefixo {*} ignora namespaces técnicos (ex: ns2:, nfs:)
         element = root.find(f".//{{*}}{tag}")
         if element is None:
             element = root.find(f".//{tag}")
@@ -45,25 +43,25 @@ def process_xml_file(content, filename):
             'Arquivo': filename,
             
             # Número da Nota
-            'Nota_Numero': get_xml_value(root, ['nNFSe', 'NumeroNFe', 'nNF', 'numero']),
+            'Nota_Numero': get_xml_value(root, ['nNFSe', 'NumeroNFe', 'nNF', 'numero', 'Numero']),
             
             # Data de Emissão
-            'Data_Emissao': get_xml_value(root, ['dhProc', 'dhEmi', 'DataEmissaoNFe', 'DataEmissao']),
+            'Data_Emissao': get_xml_value(root, ['dhProc', 'dhEmi', 'DataEmissaoNFe', 'DataEmissao', 'dtEmi']),
             
             # PRESTADOR
             'Prestador_CNPJ': get_xml_value(root, ['emit/CNPJ', 'CPFCNPJPrestador/CNPJ', 'CNPJPrestador', 'emit_CNPJ', 'CPFCNPJPrestador/CPF', 'CNPJ']),
             'Prestador_Razao': get_xml_value(root, ['emit/xNome', 'RazaoSocialPrestador', 'xNomePrestador', 'emit_xNome', 'RazaoSocial', 'xNome']),
             
-            # TOMADOR (Ajuste solicitado exclusivamente no bloco de Razão Social)
+            # TOMADOR
             'Tomador_CNPJ': get_xml_value(root, ['toma/CNPJ', 'CPFCNPJTomador/CNPJ', 'CPFCNPJTomador/CPF', 'dest/CNPJ', 'CNPJTomador', 'toma/CPF', 'tom/CNPJ', 'CNPJ']),
             'Tomador_Razao': get_xml_value(root, ['toma/xNome', 'RazaoSocialTomador', 'dest/xNome', 'xNomeTomador', 'RazaoSocialTomador', 'tom/xNome', 'xNome']),
             
             # Valores e Impostos
-            'Vlr_Bruto': get_xml_value(root, ['vServ', 'ValorServicos', 'vNF', 'vServPrest/vServ']),
-            'ISS_Retido': get_xml_value(root, ['vISSRet', 'ValorISS', 'vISSQN', 'ValorISS_Retido']),
+            'Vlr_Bruto': get_xml_value(root, ['vServ', 'ValorServicos', 'vNF', 'vServPrest/vServ', 'ValorTotal']),
+            'ISS_Retido': get_xml_value(root, ['vISSRet', 'ValorISS', 'vISSQN', 'ValorISS_Retido', 'ISSRetido']),
             
-            # Descrição do Serviço
-            'Descricao': get_xml_value(root, ['xDescServ', 'Discriminacao', 'xServ', 'infCpl'])
+            # Descrição (ALTERAÇÃO SOLICITADA: Busca código de serviço ou descrição)
+            'Descricao': get_xml_value(root, ['CodigoServico', 'itemServico', 'cServ', 'xDescServ', 'Discriminacao', 'xServ', 'infCpl'])
         }
         return row
     except:
@@ -91,7 +89,7 @@ def main():
         if data_rows:
             df = pd.DataFrame(data_rows)
             
-            # Conversão de valores financeiros para processamento correto
+            # Conversão de valores financeiros
             cols_fin = ['Vlr_Bruto', 'ISS_Retido']
             for col in cols_fin:
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
