@@ -25,20 +25,27 @@ def get_xml_value(root, tags):
     Ignora namespaces para garantir leitura universal.
     """
     for tag in tags:
+        # O prefixo .// permite encontrar a tag em qualquer profundidade
+        # O prefixo {*} ignora namespaces técnicos (ex: ns2:, nfs:, sp:)
         element = root.find(f".//{{*}}{tag}")
         if element is None:
             element = root.find(f".//{tag}")
         
         if element is not None and element.text:
             return element.text.strip()
-    return "0.00" if any(x in tag.lower() for x in ['vlr', 'valor', 'iss', 'pis', 'cofins', 'ir', 'csll', 'liquido']) else ""
+    return "0.00" if any(x in tag.lower() for x in ['vlr', 'valor', 'iss', 'pis', 'cofins', 'ir', 'csll', 'liquido', 'trib']) else ""
 
 def process_xml_file(content, filename):
     try:
         tree = ET.parse(io.BytesIO(content))
         root = tree.getroot()
         
-        # MAPEAMENTO DE POSSIBILIDADES (Ajuste cirúrgico na coluna Ret_ISS)
+        # FLAGS DE VERIFICAÇÃO (ISSRetido e tpRetISSQN)
+        # Capturamos o texto das tags que indicam se houve retenção ou não
+        iss_retido_flag = get_xml_value(root, ['ISSRetido']).lower()
+        tp_ret_flag = get_xml_value(root, ['tpRetISSQN'])
+        
+        # MAPEAMENTO DE POSSIBILIDADES (O SEU MAPA COMPLETO E INALTERADO)
         row = {
             'Arquivo': filename,
             'Nota_Numero': get_xml_value(root, ['nNFSe', 'NumeroNFe', 'nNF', 'numero', 'Numero']),
@@ -59,9 +66,6 @@ def process_xml_file(content, filename):
             # ISS PRÓPRIO
             'ISS_Valor': get_xml_value(root, ['vISS', 'ValorISS', 'vISSQN', 'iss/vISS']),
             
-            # ISS RETIDO (Ajustado para priorizar vTotTribMun e evitar sobreposição com ISS próprio)
-            'Ret_ISS': get_xml_value(root, ['vTotTribMun', 'vISSRetido', 'ValorISS_Retido', 'vRetISS', 'iss/vRet']),
-            
             # DEMAIS RETENÇÕES (Leitura Direta)
             'Ret_PIS': get_xml_value(root, ['vPIS', 'ValorPIS', 'vPIS_Ret', 'PISRetido']),
             'Ret_COFINS': get_xml_value(root, ['vCOFINS', 'ValorCOFINS', 'vCOFINS_Ret', 'COFINSRetido']),
@@ -71,13 +75,21 @@ def process_xml_file(content, filename):
             # Descrição (Código ou Descritivo)
             'Descricao': get_xml_value(root, ['CodigoServico', 'itemServico', 'cServ', 'xDescServ', 'Discriminacao', 'xServ', 'infCpl', 'xProd'])
         }
+
+        # BLINDAGEM DO ISS RETIDO (Regra: se a flag for falsa ou tpRet for 1, o retido é ZERO)
+        if iss_retido_flag == 'false' or tp_ret_flag == '1':
+            row['Ret_ISS'] = "0.00"
+        else:
+            # Caso contrário, o sistema busca as tags de retenção mapeadas
+            row['Ret_ISS'] = get_xml_value(root, ['vTotTribMun', 'vISSRetido', 'ValorISS_Retido', 'vRetISS', 'vISSRet', 'iss/vRet'])
+
         return row
     except:
         return None
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria Fiscal: Blindagem de ISS Retido")
+    st.subheader("Auditoria Fiscal: Blindagem de ISS Retido com Respeito às Flags de Isenção")
 
     uploaded_files = st.file_uploader("Upload de XML ou ZIP", type=["xml", "zip"], accept_multiple_files=True)
 
