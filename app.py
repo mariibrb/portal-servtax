@@ -22,7 +22,7 @@ st.markdown("""
 def get_xml_value(root, tags):
     """
     Busca em Cascata com XPath: tenta cada tag da lista em qualquer nível do XML.
-    Ignora namespaces para garantir leitura universal de centenas de prefeituras.
+    Ignora namespaces para garantir leitura universal.
     """
     for tag in tags:
         element = root.find(f".//{{*}}{tag}")
@@ -31,14 +31,14 @@ def get_xml_value(root, tags):
         
         if element is not None and element.text:
             return element.text.strip()
-    return "0.00" if any(x in tag.lower() for x in ['vlr', 'valor', 'iss', 'pis', 'cofins', 'ir', 'csll', 'liquido', 'trib', 'aliq']) else ""
+    return "0.00" if any(x in tag.lower() for x in ['vlr', 'valor', 'iss', 'pis', 'cofins', 'ir', 'csll', 'liquido', 'trib']) else ""
 
 def process_xml_file(content, filename):
     try:
         tree = ET.parse(io.BytesIO(content))
         root = tree.getroot()
         
-        # MAPEAMENTO DE POSSIBILIDADES (Com inclusão de Tributos Municipais)
+        # MAPEAMENTO DE POSSIBILIDADES (Incluindo vTotTribMun conforme solicitado)
         row = {
             'Arquivo': filename,
             'Nota_Numero': get_xml_value(root, ['nNFSe', 'NumeroNFe', 'nNF', 'numero', 'Numero']),
@@ -56,13 +56,9 @@ def process_xml_file(content, filename):
             'Vlr_Bruto': get_xml_value(root, ['vServ', 'ValorServicos', 'vNF', 'vServPrest/vServ', 'ValorTotal']),
             'Vlr_Liquido': get_xml_value(root, ['vLiq', 'ValorLiquidoNFe', 'vLiqNFSe', 'vLiquido', 'vServPrest/vLiq']),
             
-            # ISS PRÓPRIO (Inclusão da tag vTotTribMun solicitada)
-            'ISS_Valor': get_xml_value(root, ['vISS', 'ValorISS', 'vISSQN', 'iss/vISS', 'vTotTribMun', 'vTotTrib/vTotTribMun']),
-            'ISS_Aliquota': get_xml_value(root, ['pAliq', 'AliquotaServicos', 'Aliquota', 'aliq']),
-            
-            # ISS RETIDO (Mapeamento exaustivo)
-            'Ret_ISS': get_xml_value(root, ['vISSRet', 'ValorISS_Retido', 'ISSRetido', 'vISSRetido', 'vRetISS', 'iss/vRet']),
-            'Tipo_Retencao': get_xml_value(root, ['tpRetISSQN', 'ISS_Retido']),
+            # ISS (Próprio e Retido - Incluindo vTotTribMun)
+            'ISS_Valor': get_xml_value(root, ['vISS', 'ValorISS', 'vISSQN', 'iss/vISS', 'vTotTribMun']),
+            'Ret_ISS': get_xml_value(root, ['vISSRet', 'ValorISS_Retido', 'ISSRetido', 'vISSRetido', 'vRetISS', 'vTotTribMun', 'iss/vRet']),
             
             # DEMAIS RETENÇÕES (Leitura Direta)
             'Ret_PIS': get_xml_value(root, ['vPIS', 'ValorPIS', 'vPIS_Ret', 'PISRetido']),
@@ -79,7 +75,7 @@ def process_xml_file(content, filename):
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria Fiscal Multi-Prefeituras (Mapeamento de Tributos Municipais)")
+    st.subheader("Auditoria Fiscal Multi-Prefeituras (Mapeamento Universal de Tags)")
 
     uploaded_files = st.file_uploader("Upload de XML ou ZIP", type=["xml", "zip"], accept_multiple_files=True)
 
@@ -100,7 +96,7 @@ def main():
             df = pd.DataFrame(data_rows)
             
             # Conversão Numérica para Auditoria
-            cols_fin = ['Vlr_Bruto', 'Vlr_Liquido', 'ISS_Valor', 'ISS_Aliquota', 'Ret_ISS', 'Ret_PIS', 'Ret_COFINS', 'Ret_CSLL', 'Ret_IRRF']
+            cols_fin = ['Vlr_Bruto', 'Vlr_Liquido', 'ISS_Valor', 'Ret_ISS', 'Ret_PIS', 'Ret_COFINS', 'Ret_CSLL', 'Ret_IRRF']
             for col in cols_fin:
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
 
