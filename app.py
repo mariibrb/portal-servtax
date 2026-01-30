@@ -22,11 +22,10 @@ st.markdown("""
 def get_xml_value(root, tags):
     """
     Busca em Cascata com XPath: tenta cada tag da lista em qualquer nível do XML.
-    Ignora namespaces para garantir leitura universal.
+    O prefixo .// permite encontrar a tag em qualquer profundidade.
+    O prefixo {*} ignora namespaces (como ns2:, nfs:, sp:).
     """
     for tag in tags:
-        # O prefixo .// permite encontrar a tag em qualquer profundidade
-        # O prefixo {*} ignora namespaces técnicos (ex: ns2:, nfs:)
         element = root.find(f".//{{*}}{tag}")
         if element is None:
             element = root.find(f".//{tag}")
@@ -40,30 +39,30 @@ def process_xml_file(content, filename):
         tree = ET.parse(io.BytesIO(content))
         root = tree.getroot()
         
-        # MAPEAMENTO DE POSSIBILIDADES (Ajuste Fino: Inclusão de CNPJ e Razão Social)
+        # MAPEAMENTO DE TODAS AS POSSIBILIDADES (O "SOMASES" DE TAGS)
         row = {
             'Arquivo': filename,
             
             # Número da Nota
-            'Nota_Numero': get_xml_value(root, ['nNFSe', 'NumeroNFe', 'nNF', 'numero']),
+            'Nota_Numero': get_xml_value(root, ['nNFSe', 'NumeroNFe', 'nNF', 'numero', 'Numero']),
             
             # Data de Emissão
-            'Data_Emissao': get_xml_value(root, ['dhProc', 'dhEmi', 'DataEmissaoNFe', 'DataEmissao']),
+            'Data_Emissao': get_xml_value(root, ['dhProc', 'dhEmi', 'DataEmissaoNFe', 'DataEmissao', 'dtEmi']),
             
-            # PRESTADOR (Tags para CNPJ e Razão Social - SP e Nacional)
-            'Prestador_CNPJ': get_xml_value(root, ['emit/CNPJ', 'CPFCNPJPrestador/CNPJ', 'CNPJPrestador', 'emit_CNPJ', 'CPFCNPJPrestador/CPF']),
+            # PRESTADOR (CNPJ e Razão Social)
+            'Prestador_CNPJ': get_xml_value(root, ['emit/CNPJ', 'CPFCNPJPrestador/CNPJ', 'CNPJPrestador', 'emit_CNPJ', 'CPFCNPJPrestador/CPF', 'CNPJ']),
             'Prestador_Razao': get_xml_value(root, ['RazaoSocialPrestador', 'emit/xNome', 'xNomePrestador', 'emit_xNome', 'RazaoSocial']),
             
-            # TOMADOR (Tags para CNPJ e Razão Social - SP e Nacional)
+            # TOMADOR (CNPJ e Razão Social)
             'Tomador_CNPJ': get_xml_value(root, ['toma/CNPJ', 'CPFCNPJTomador/CNPJ', 'CPFCNPJTomador/CPF', 'dest/CNPJ', 'CNPJTomador', 'toma/CPF']),
             'Tomador_Razao': get_xml_value(root, ['toma/xNome', 'RazaoSocialTomador', 'dest/xNome', 'xNomeTomador', 'RazaoSocialTomador']),
             
             # Valores e Impostos
-            'Vlr_Bruto': get_xml_value(root, ['vServ', 'ValorServicos', 'vNF', 'vServPrest/vServ']),
-            'ISS_Retido': get_xml_value(root, ['vISSRet', 'ValorISS', 'vISSQN', 'ValorISS_Retido']),
+            'Vlr_Bruto': get_xml_value(root, ['vServ', 'ValorServicos', 'vNF', 'vServPrest/vServ', 'ValorTotal']),
+            'ISS_Retido': get_xml_value(root, ['vISSRet', 'ValorISS', 'vISSQN', 'ValorISS_Retido', 'ISSRetido']),
             
             # Descrição do Serviço
-            'Descricao': get_xml_value(root, ['xDescServ', 'Discriminacao', 'xServ', 'infCpl'])
+            'Descricao': get_xml_value(root, ['xDescServ', 'Discriminacao', 'xServ', 'infCpl', 'xProd'])
         }
         return row
     except:
@@ -71,7 +70,7 @@ def process_xml_file(content, filename):
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria Fiscal: Mapeamento de Razão Social (Ajuste Final)")
+    st.subheader("Auditoria Fiscal: Mapeamento Universal de Tags (SP & Nacional)")
 
     uploaded_files = st.file_uploader("Upload de XML ou ZIP", type=["xml", "zip"], accept_multiple_files=True)
 
@@ -91,7 +90,7 @@ def main():
         if data_rows:
             df = pd.DataFrame(data_rows)
             
-            # Conversão de valores financeiros para processamento correto
+            # Conversão de valores financeiros para Excel
             cols_fin = ['Vlr_Bruto', 'ISS_Retido']
             for col in cols_fin:
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
@@ -111,13 +110,13 @@ def main():
                     worksheet.set_column(i, i, 22)
 
             st.download_button(
-                label="📥 Baixar Planilha de Auditoria",
+                label="📥 Baixar Planilha de Auditoria Completa",
                 data=output.getvalue(),
                 file_name="portal_servtax_auditoria.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            st.error("Erro: Nenhum dado capturado nos arquivos.")
+            st.error("Erro: Nenhum dado capturado. Verifique os arquivos.")
 
 if __name__ == "__main__":
     main()
