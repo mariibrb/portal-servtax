@@ -16,6 +16,7 @@ st.markdown("""
     .stButton>button { background-color: #FF69B4; color: white; border-radius: 10px; border: none; font-weight: bold; width: 100%; height: 3em; }
     .stButton>button:hover { background-color: #FFDEEF; color: #FF69B4; border: 1px solid #FF69B4; }
     [data-testid="stFileUploadDropzone"] { border: 2px dashed #FF69B4; background-color: #FFDEEF; }
+    .instrucoes { background-color: #FFF0F5; border-left: 5px solid #FF69B4; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -87,7 +88,32 @@ def process_xml_file(content, filename):
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria Fiscal: Diagnóstico de Retenções e Mapeamento Universal")
+    
+    # --- MANUAL DE INSTRUÇÕES E OBJETIVOS ---
+    with st.expander("📖 Manual de Instruções e Objetivos (Clique para expandir)", expanded=True):
+        st.markdown("""
+        <div class="instrucoes">
+            <h3>🎯 O que esta ferramenta faz?</h3>
+            <p>O <b>Portal ServTax</b> realiza a leitura universal de arquivos XML de Notas Fiscais de Serviço (NFSe), 
+            identificando automaticamente dados de prestadores, tomadores, valores brutos, líquidos e retenções tributárias 
+            (ISS, PIS, COFINS, CSLL e IRRF), tanto no padrão de São Paulo quanto no Padrão Nacional.</p>
+            
+            <h3>🚀 Passo a Passo:</h3>
+            <ol>
+                <li><b>Upload:</b> Clique no botão abaixo ou arraste seus arquivos <b>.XML</b> ou <b>.ZIP</b> (contendo XMLs).</li>
+                <li><b>Processamento:</b> A ferramenta lerá cada arquivo em cascata para encontrar as tags corretas de cada município.</li>
+                <li><b>Diagnóstico:</b> Verifique a coluna final de <b>Diagnóstico</b>:
+                    <ul>
+                        <li>✅ : O valor bruto e líquido batem (não há retenções aparentes).</li>
+                        <li>⚠️ : Diferença detectada! Avalie as colunas de retenção para escrituração.</li>
+                    </ul>
+                </li>
+                <li><b>Exportação:</b> Baixe o resultado em Excel para seguir com sua auditoria fiscal.</li>
+            </ol>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.subheader("Auditoria Fiscal: Mapeamento Universal")
 
     uploaded_files = st.file_uploader("Upload de XML ou ZIP", type=["xml", "zip"], accept_multiple_files=True)
 
@@ -112,8 +138,7 @@ def main():
             for col in cols_fin:
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
 
-            # --- NOVA COLUNA: DIAGNÓSTICO ---
-            # Compara bruto e líquido para avisar sobre possíveis retenções
+            # DIAGNÓSTICO
             def gerar_diagnostico(row):
                 if abs(row['Vlr_Bruto'] - row['Vlr_Liquido']) > 0.01:
                     return "⚠️ ATENÇÃO: Divergência Detectada! Verificar Retenções."
@@ -137,9 +162,6 @@ def main():
                 worksheet = writer.sheets['PortalServTax']
                 header_fmt = workbook.add_format({'bold': True, 'bg_color': '#FF69B4', 'font_color': 'white', 'border': 1})
                 num_fmt = workbook.add_format({'num_format': '#,##0.00'})
-                
-                # Formatação condicional no Excel para o Diagnóstico
-                diag_alerta = workbook.add_format({'bg_color': '#FFC7CE', 'font_color': '#9C0006'})
                 
                 for i, col in enumerate(df.columns):
                     worksheet.write(0, i, col, header_fmt)
