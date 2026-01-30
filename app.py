@@ -22,6 +22,8 @@ st.markdown("""
 def get_xml_value(root, tags):
     """
     Busca em Cascata com XPath: tenta cada tag da lista em qualquer nível do XML.
+    O prefixo .// permite encontrar a tag em qualquer profundidade.
+    O prefixo {*} ignora namespaces (como ns2:, nfs:, sp:).
     """
     for tag in tags:
         element = root.find(f".//{{*}}{tag}")
@@ -37,30 +39,30 @@ def process_xml_file(content, filename):
         tree = ET.parse(io.BytesIO(content))
         root = tree.getroot()
         
-        # Mapeamento de Possibilidades (Ajuste para Prestador e Tomador)
+        # MAPEAMENTO ROBUSTO (Garante Prestador e Tomador)
         row = {
             'Arquivo': filename,
             
             # Número da Nota
-            'Nota_Numero': get_xml_value(root, ['nNFSe', 'NumeroNFe', 'nNF', 'numero']),
+            'Nota_Numero': get_xml_value(root, ['nNFSe', 'NumeroNFe', 'nNF', 'numero', 'Numero']),
             
             # Data de Emissão
-            'Data_Emissao': get_xml_value(root, ['dhProc', 'dhEmi', 'DataEmissaoNFe', 'DataEmissao']),
+            'Data_Emissao': get_xml_value(root, ['dhProc', 'dhEmi', 'DataEmissaoNFe', 'DataEmissao', 'dtEmi']),
             
-            # PRESTADOR - Busca em blocos de emitente ou tags diretas de SP
-            'Prestador_CNPJ': get_xml_value(root, ['emit/CNPJ', 'CPFCNPJPrestador/CNPJ', 'CNPJPrestador', 'emit_CNPJ', 'CPFCNPJPrestador/CPF']),
+            # PRESTADOR - Busca tags de SP e blocos Nacional (emit)
+            'Prestador_CNPJ': get_xml_value(root, ['emit/CNPJ', 'CPFCNPJPrestador/CNPJ', 'CNPJPrestador', 'emit_CNPJ', 'CPFCNPJPrestador/CPF', 'CNPJ']),
             'Prestador_Razao': get_xml_value(root, ['RazaoSocialPrestador', 'emit/xNome', 'xNomePrestador', 'emit_xNome', 'RazaoSocial']),
             
-            # TOMADOR - Busca em blocos de tomador/destinatário ou tags diretas de SP
+            # TOMADOR - Busca tags de SP e blocos Nacional (toma/dest)
             'Tomador_CNPJ': get_xml_value(root, ['toma/CNPJ', 'CPFCNPJTomador/CNPJ', 'CPFCNPJTomador/CPF', 'dest/CNPJ', 'CNPJTomador', 'toma/CPF', 'tom/CNPJ']),
             'Tomador_Razao': get_xml_value(root, ['toma/xNome', 'RazaoSocialTomador', 'dest/xNome', 'xNomeTomador', 'RazaoSocialTomador', 'tom/xNome']),
             
             # Valores e Impostos
-            'Vlr_Bruto': get_xml_value(root, ['vServ', 'ValorServicos', 'vNF', 'vServPrest/vServ']),
-            'ISS_Retido': get_xml_value(root, ['vISSRet', 'ValorISS', 'vISSQN', 'ValorISS_Retido']),
+            'Vlr_Bruto': get_xml_value(root, ['vServ', 'ValorServicos', 'vNF', 'vServPrest/vServ', 'ValorTotal']),
+            'ISS_Retido': get_xml_value(root, ['vISSRet', 'ValorISS', 'vISSQN', 'ValorISS_Retido', 'ISSRetido']),
             
             # Descrição do Serviço
-            'Descricao': get_xml_value(root, ['xDescServ', 'Discriminacao', 'xServ', 'infCpl'])
+            'Descricao': get_xml_value(root, ['xDescServ', 'Discriminacao', 'xServ', 'infCpl', 'xProd'])
         }
         return row
     except:
@@ -68,7 +70,7 @@ def process_xml_file(content, filename):
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria Fiscal: Mapeamento de Prestador e Tomador")
+    st.subheader("Auditoria Fiscal: Mapeamento Universal de Prestador e Tomador")
 
     uploaded_files = st.file_uploader("Upload de XML ou ZIP", type=["xml", "zip"], accept_multiple_files=True)
 
@@ -108,13 +110,13 @@ def main():
                     worksheet.set_column(i, i, 22)
 
             st.download_button(
-                label="📥 Baixar Planilha de Auditoria",
+                label="📥 Baixar Planilha de Auditoria Completa",
                 data=output.getvalue(),
                 file_name="portal_servtax_auditoria.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            st.error("Erro: Nenhum dado capturado nos ficheiros.")
+            st.error("Erro: Nenhum dado capturado. Verifique os ficheiros.")
 
 if __name__ == "__main__":
     main()
