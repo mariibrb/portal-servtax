@@ -22,7 +22,7 @@ st.markdown("""
 def flatten_dict(d, parent_key='', sep='_'):
     items = []
     for k, v in d.items():
-        # Remove prefixos de namespace (ex: ns2:tag -> tag) para facilitar a busca
+        # Limpa prefixos de namespace (ns2:tag -> tag)
         clean_k = k.split(':')[-1] if ':' in k else k
         new_key = f"{parent_key}{sep}{clean_k}" if parent_key else clean_k
         
@@ -37,6 +37,27 @@ def flatten_dict(d, parent_key='', sep='_'):
         else:
             items.append((new_key, v))
     return dict(items)
+
+def simplify_columns(df):
+    """
+    Simplifica os nomes das colunas pegando apenas o último termo 
+    após o separador '_' para facilitar a leitura.
+    """
+    new_columns = {}
+    for col in df.columns:
+        if '_' in col:
+            # Pega o último termo (ex: Valores_ValorIss -> ValorIss)
+            simple_name = col.split('_')[-1]
+            
+            # Se o nome simplificado já existir (duplicidade), mantém um pouco do pai
+            if simple_name in new_columns.values():
+                parts = col.split('_')
+                simple_name = f"{parts[-2]}_{parts[-1]}" if len(parts) > 1 else col
+            
+            new_columns[col] = simple_name
+        else:
+            new_columns[col] = col
+    return df.rename(columns=new_columns)
 
 def extract_xml_from_zip(zip_data, extracted_list):
     with zipfile.ZipFile(io.BytesIO(zip_data)) as z:
@@ -70,16 +91,19 @@ def process_files(uploaded_files):
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria Fiscal de NFS-e (Consolidado)")
+    st.subheader("Auditoria Fiscal de NFS-e (Colunas Simplificadas)")
 
     uploaded_files = st.file_uploader("Arraste seus XMLs ou ZIPs aqui", type=["xml", "zip"], accept_multiple_files=True)
 
     if uploaded_files:
-        with st.spinner('Extraindo dados...'):
+        with st.spinner('Extraindo e simplificando dados...'):
             df_total = process_files(uploaded_files)
         
         if not df_total.empty:
-            # Seleção Inteligente: Pega colunas que CONTÉM essas palavras
+            # 1. Simplifica os nomes das colunas
+            df_total = simplify_columns(df_total)
+
+            # 2. Filtro de Auditoria
             keywords = [
                 'Numero', 'Data', 'Cnpj', 'RazaoSocial', 'Valor', 'Iss', 'Pis', 
                 'Cofins', 'Ir', 'Csll', 'Ibs', 'Cbs', 'Nbs', 'Cclass', 'Descricao', 'Chave'
@@ -91,32 +115,28 @@ def main():
                     if col not in cols_to_keep:
                         cols_to_keep.append(col)
             
-            # Se por acaso o filtro de keywords falhar, mostramos tudo para não virar "coluna única"
-            if len(cols_to_keep) < 5:
-                df_final = df_total
-            else:
-                df_final = df_total[cols_to_keep]
+            # Garante que não ficaremos com coluna única
+            df_final = df_total[cols_to_keep] if len(cols_to_keep) > 5 else df_total
 
-            st.success(f"Concluído! {len(df_final)} notas processadas e {len(df_final.columns)} colunas identificadas.")
+            st.success(f"Concluído! {len(df_final)} notas e {len(df_final.columns)} colunas amigáveis.")
             
-            st.write("### Preview da Auditoria")
+            st.write("### Preview da Auditoria (Nomes Curtos)")
             st.dataframe(df_final.head(10))
 
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                 df_final.to_excel(writer, index=False, sheet_name='Auditoria_Fiscal')
                 
-                # Auto-ajuste de largura
                 workbook = writer.book
                 worksheet = writer.sheets['Auditoria_Fiscal']
                 for i, col in enumerate(df_final.columns):
                     column_len = max(df_final[col].astype(str).str.len().max(), len(col)) + 2
-                    worksheet.set_column(i, i, min(column_len, 50)) # Limita a 50 para não esticar demais
+                    worksheet.set_column(i, i, min(column_len, 40))
 
             st.download_button(
-                label="📥 Baixar Excel Completo",
+                label="📥 Baixar Excel Simplificado",
                 data=output.getvalue(),
-                file_name="portal_servtax_auditoria.xlsx",
+                file_name="portal_servtax_limpo.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
