@@ -38,11 +38,11 @@ def process_xml_file(content, filename):
         tree = ET.parse(io.BytesIO(content))
         root = tree.getroot()
         
-        # FLAGS DE VERIFICAÇÃO (Padrão Antigo vs Padrão Nacional)
+        # FLAGS DE VERIFICAÇÃO
         iss_retido_flag = get_xml_value(root, ['ISSRetido']).lower()
         tp_ret_flag = get_xml_value(root, ['tpRetISSQN'])
         
-        # MAPEAMENTO DE POSSIBILIDADES (O SEU MAPA COMPLETO E INALTERADO)
+        # MAPEAMENTO DE POSSIBILIDADES
         row = {
             'Arquivo': filename,
             'Nota_Numero': get_xml_value(root, ['nNFSe', 'NumeroNFe', 'nNF', 'numero', 'Numero']),
@@ -56,32 +56,29 @@ def process_xml_file(content, filename):
             'Tomador_CNPJ': get_xml_value(root, ['toma/CNPJ', 'CPFCNPJTomador/CNPJ', 'CPFCNPJTomador/CPF', 'dest/CNPJ', 'CNPJTomador', 'toma/CPF', 'tom/CNPJ', 'CNPJ']),
             'Tomador_Razao': get_xml_value(root, ['toma/xNome', 'RazaoSocialTomador', 'dest/xNome', 'xNomeTomador', 'RazaoSocialTomador', 'tom/xNome', 'xNome']),
             
-            # VALORES TOTAIS (Leitura Direta)
+            # VALORES TOTAIS
             'Vlr_Bruto': get_xml_value(root, ['vServ', 'ValorServicos', 'vNF', 'vServPrest/vServ', 'ValorTotal']),
             'Vlr_Liquido': get_xml_value(root, ['vLiq', 'ValorLiquidoNFe', 'vLiqNFSe', 'vLiquido', 'vServPrest/vLiq']),
             
             # ISS PRÓPRIO
             'ISS_Valor': get_xml_value(root, ['vISS', 'ValorISS', 'vISSQN', 'iss/vISS']),
             
-            # DEMAIS RETENÇÕES (Leitura Direta)
+            # RETENÇÕES IMPOSTOS FEDERAIS
             'Ret_PIS': get_xml_value(root, ['vPIS', 'ValorPIS', 'vPIS_Ret', 'PISRetido']),
             'Ret_COFINS': get_xml_value(root, ['vCOFINS', 'ValorCOFINS', 'vCOFINS_Ret', 'COFINSRetido']),
             'Ret_CSLL': get_xml_value(root, ['vCSLL', 'ValorCSLL', 'vCSLL_Ret', 'CSLLRetido']),
             'Ret_IRRF': get_xml_value(root, ['vIR', 'ValorIR', 'vIR_Ret', 'IRRetido']),
             
-            # Descrição (Código ou Descritivo)
+            # Descrição
             'Descricao': get_xml_value(root, ['CodigoServico', 'itemServico', 'cServ', 'xDescServ', 'Discriminacao', 'xServ', 'infCpl', 'xProd'])
         }
 
-        # NOVA LÓGICA DE BLINDAGEM INTELIGENTE
-        # Se tpRetISSQN for 2 (Nacional) OU ISSRetido for true (Antigo), a retenção é lida.
-        # Se for false E tpRet for 1 (ou vazio), o retido é ZERO.
+        # LÓGICA DE BLINDAGEM DE RETENÇÃO
         if tp_ret_flag == '2' or iss_retido_flag == 'true':
              row['Ret_ISS'] = get_xml_value(root, ['vTotTribMun', 'vISSRetido', 'ValorISS_Retido', 'vRetISS', 'vISSRet', 'iss/vRet'])
         elif iss_retido_flag == 'false' or tp_ret_flag == '1':
              row['Ret_ISS'] = "0.00"
         else:
-             # Fallback para notas que não trazem a flag mas trazem o valor
              row['Ret_ISS'] = get_xml_value(root, ['vTotTribMun', 'vISSRetido', 'ValorISS_Retido', 'vRetISS', 'vISSRet', 'iss/vRet'])
 
         return row
@@ -90,7 +87,7 @@ def process_xml_file(content, filename):
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria Fiscal: Mapeamento Universal de Retenção (SP & Nacional)")
+    st.subheader("Auditoria Fiscal: Mapeamento Universal (SP & Nacional)")
 
     uploaded_files = st.file_uploader("Upload de XML ou ZIP", type=["xml", "zip"], accept_multiple_files=True)
 
@@ -110,10 +107,16 @@ def main():
         if data_rows:
             df = pd.DataFrame(data_rows)
             
-            # Conversão Numérica para Auditoria
+            # Conversão Numérica
             cols_fin = ['Vlr_Bruto', 'Vlr_Liquido', 'ISS_Valor', 'Ret_ISS', 'Ret_PIS', 'Ret_COFINS', 'Ret_CSLL', 'Ret_IRRF']
             for col in cols_fin:
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
+
+            # AJUSTE DA ORDEM DAS COLUNAS: Ret_ISS logo após ISS_Valor
+            cols = list(df.columns)
+            if 'Ret_ISS' in cols and 'ISS_Valor' in cols:
+                cols.insert(cols.index('ISS_Valor') + 1, cols.pop(cols.index('Ret_ISS')))
+                df = df[cols]
 
             st.success(f"Notas processadas com sucesso: {len(df)}")
             st.dataframe(df)
