@@ -7,7 +7,7 @@ import zipfile
 # Configuração da Página
 st.set_page_config(page_title="Portal ServTax", layout="wide", page_icon="📑")
 
-# Estilo Rihanna (Rosa e Branco)
+# Estilo Rihanna
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&family=Plus+Jakarta+Sans:wght@400;700&display=swap');
@@ -39,50 +39,53 @@ def flatten_dict(d, parent_key='', sep='_'):
 
 def simplify_and_filter(df):
     """
-    Motor de Equivalência: Mapeia diferentes padrões (Nacional vs SP) para a mesma coluna.
+    Motor de Equivalência Refinado: Identifica padrões SP e Nacional para dados cadastrais.
     """
     final_df_data = {}
     if 'Arquivo_Origem' in df.columns:
         final_df_data['Arquivo'] = df['Arquivo_Origem']
 
-    # MAPEAMENTO DE EQUIVALÊNCIAS
+    # MAPEAMENTO DE EQUIVALÊNCIAS BASEADO NOS SEUS XMLS
     mapping = {
         'Nota_Numero': ['nNFSe', 'NumeroNFe', 'nNF', 'numero'],
-        'Data_Emissao': ['dhProc', 'DataEmissaoNFe', 'dataemissao', 'dhEmi'],
+        'Data_Emissao': ['dhProc', 'DataEmissaoNFe', 'DataEmissao', 'dhEmi'],
         
         # PRESTADOR (Equivalência Emit vs Prestador SP)
-        'Prestador_CNPJ': ['emit_CNPJ', 'CPFCNPJPrestador_CNPJ', 'prestador_cnpj'],
-        'Prestador_Razao': ['emit_xNome', 'RazaoSocialPrestador', 'prestador_razao'],
+        'Prestador_CNPJ': ['emit_CNPJ', 'CPFCNPJPrestador_CNPJ', 'CNPJPrestador', 'prestador_cnpj'],
+        'Prestador_Razao': ['emit_xNome', 'RazaoSocialPrestador', 'xNomePrestador', 'prestador_razao'],
         
-        # TOMADOR (Equivalência Toma vs Tomador SP) - O ajuste que faltava!
-        'Tomador_CNPJ': ['toma_CNPJ', 'CPFCNPJTomador_CNPJ', 'CPFCNPJTomador_CPF', 'toma_CPF', 'tomador_cnpj'],
-        'Tomador_Razao': ['toma_xNome', 'RazaoSocialTomador', 'tomador_razao', 'dest_xNome'],
+        # TOMADOR (Equivalência Toma vs Tomador SP)
+        'Tomador_CNPJ': ['toma_CNPJ', 'CPFCNPJTomador_CNPJ', 'CPFCNPJTomador_CPF', 'toma_CPF', 'CNPJTomador'],
+        'Tomador_Razao': ['toma_xNome', 'RazaoSocialTomador', 'xNomeTomador', 'dest_xNome'],
         
-        # VALORES (Equivalência vServ vs ValorServicos SP)
+        # VALORES
         'Vlr_Bruto': ['vServ', 'ValorServicos', 'valorbruto', 'v_serv', 'vNF'],
         
-        # RETENÇÕES (Equivalência vPIS vs ValorPIS SP)
-        'ISS_Retido': ['vISSRet', 'ValorISS', 'iss_retido'],
+        # RETENÇÕES
+        'ISS_Retido': ['vISSRet', 'ValorISS', 'iss_retido', 'ValorISS_Retido'],
         'PIS_Retido': ['vPIS', 'ValorPIS', 'pis_retido'],
         'COFINS_Retido': ['vCOFINS', 'ValorCOFINS', 'cofins_retido'],
         'IRRF_Retido': ['vIR', 'ValorIR', 'ir_retido'],
         'CSLL_Retido': ['vCSLL', 'ValorCSLL', 'csll_retido'],
         
-        # DESCRIÇÃO (Equivalência xDescServ vs Discriminacao SP)
-        'Servico_Descricao': ['xDescServ', 'Discriminacao', 'xServ', 'infCpl', 'xProd']
+        # DESCRIÇÃO
+        'Servico_Descricao': ['xDescServ', 'Discriminacao', 'xServ', 'infCpl', 'xProd', 'discriminacao']
     }
 
     for friendly_name, radicals in mapping.items():
         found_series = None
         for col in df.columns:
-            # Verifica se o nome da coluna TERMINA com algum dos radicais (mais preciso para aninhados)
-            if any(col.endswith(rad) for rad in radicals):
-                # Proteção de Contexto
-                if 'Prestador' in friendly_name and ('Tomador' in col or 'toma' in col.lower()): continue
-                if 'Tomador' in friendly_name and ('Prestador' in col or 'emit' in col.lower()): continue
+            # Busca ignorando case e verificando se o nome da coluna termina com o radical
+            col_lower = col.lower()
+            if any(col_lower.endswith(rad.lower()) for rad in radicals):
+                # Filtro de Contexto para não cruzar Prestador/Tomador
+                if 'Prestador' in friendly_name and ('tomador' in col_lower or 'toma' in col_lower or 'dest' in col_lower): continue
+                if 'Tomador' in friendly_name and ('prestador' in col_lower or 'emit' in col_lower): continue
                 
+                # Prioriza colunas que não estejam totalmente vazias
+                current_col = df[col]
                 if found_series is None or (isinstance(found_series, pd.Series) and found_series.isnull().all()):
-                    found_series = df[col]
+                    found_series = current_col
 
         if found_series is not None:
             if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL']):
@@ -107,29 +110,30 @@ def extract_xml_from_zip(zip_data, extracted_list):
     except: pass
 
 def process_files(uploaded_files):
-    xml_contents = []
+    all_extracted_data = []
     for uploaded_file in uploaded_files:
         content = uploaded_file.read()
         if uploaded_file.name.lower().endswith('.xml'):
-            xml_contents.append({'name': uploaded_file.name, 'content': content})
+            all_extracted_data.append({'name': uploaded_file.name, 'content': content})
         elif uploaded_file.name.lower().endswith('.zip'):
-            extract_xml_from_zip(content, xml_contents)
+            extract_xml_from_zip(content, all_extracted_data)
             
-    extracted_data = []
-    for xml_item in xml_contents:
+    final_rows = []
+    for item in all_extracted_data:
         try:
-            data_dict = xmltodict.parse(xml_item['content'])
+            data_dict = xmltodict.parse(item['content'])
+            # Tratamento para quando o xmltodict retorna múltiplos elementos ou listas
             if isinstance(data_dict, list):
-                for item in data_dict:
-                    flat = flatten_dict(item)
-                    flat['Arquivo_Origem'] = xml_item['name']
-                    extracted_data.append(flat)
+                for sub_item in data_dict:
+                    flat = flatten_dict(sub_item)
+                    flat['Arquivo_Origem'] = item['name']
+                    final_rows.append(flat)
             else:
                 flat_data = flatten_dict(data_dict)
-                flat_data['Arquivo_Origem'] = xml_item['name']
-                extracted_data.append(flat_data)
+                flat_data['Arquivo_Origem'] = item['name']
+                final_rows.append(flat_data)
         except: continue
-    return pd.DataFrame(extracted_data)
+    return pd.DataFrame(final_rows)
 
 def main():
     st.title("📑 Portal ServTax")
@@ -138,13 +142,13 @@ def main():
     uploaded_files = st.file_uploader("Upload de XML ou ZIP", type=["xml", "zip"], accept_multiple_files=True)
 
     if uploaded_files:
-        with st.spinner('Realizando equivalência de tags fiscais...'):
+        with st.spinner('Consolidando dados cadastrais e fiscais...'):
             df_raw = process_files(uploaded_files)
         
         if not df_raw.empty:
             df_final = simplify_and_filter(df_raw)
 
-            st.success(f"Notas processadas: {len(df_final)}")
+            st.success(f"Sucesso! {len(df_final)} notas processadas.")
             st.dataframe(df_final)
 
             output = io.BytesIO()
@@ -160,11 +164,11 @@ def main():
             st.download_button(
                 label="📥 Baixar Excel de Auditoria",
                 data=output.getvalue(),
-                file_name="portal_servtax_equivalencia.xlsx",
+                file_name="portal_servtax_auditoria.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            st.warning("Nenhum dado encontrado.")
+            st.warning("Nenhum dado válido encontrado.")
 
 if __name__ == "__main__":
     main()
