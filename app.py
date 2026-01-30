@@ -42,18 +42,18 @@ def simplify_and_filter(df):
     if 'Arquivo_Origem' in df.columns:
         final_df_data['Arquivo'] = df['Arquivo_Origem']
 
-    # Mapeamento Ultra-Resiliente (Incluindo Padrão de Produto/Emitente/Destinatário)
+    # MAPEAMENTO REFINADO - FOCO EM TOMADOR E DESCRIÇÃO
     targets = {
         'Nota_Numero': ['numero', 'nnfse', 'numnf', 'nfnr', 'notafiscal', 'nnf'],
         'Data_Emissao': ['dataemissao', 'dtemic', 'dtrem', 'dhemi', 'dtaemi', 'datahora', 'dh_emi', 'dtemit'],
         
-        # PRESTADOR / EMITENTE
+        # PRESTADOR / EMITENTE (Estável)
         'Prestador_CNPJ': ['prestador_cnpj', 'prestador_cpfcnpj', 'emit_cnpj', 'emit_cpf', 'identificacaoprestador_cnpj'],
         'Prestador_Razao': ['prestador_razaosocial', 'prestador_xnome', 'emit_xnome', 'emit_razao', 'emit_nome'],
         
-        # TOMADOR / DESTINATÁRIO
-        'Tomador_CNPJ': ['tomador_cnpj', 'tomador_cpfcnpj', 'dest_cnpj', 'dest_cpf', 'identificacaotomador_cnpj'],
-        'Tomador_Razao': ['tomador_razaosocial', 'tomador_xnome', 'dest_xnome', 'dest_razao', 'dest_nome'],
+        # TOMADOR / DESTINATÁRIO (Ajuste Fino)
+        'Tomador_CNPJ': ['tomador_cnpj', 'tomador_cpfcnpj', 'dest_cnpj', 'dest_cpf', 'identificacaotomador_cnpj', 'tomador_id_cnpj', 'dest_id_cnpj', 'cpf_cnpj_tomador'],
+        'Tomador_Razao': ['tomador_razaosocial', 'tomador_xnome', 'dest_xnome', 'dest_razao', 'dest_nome', 'tomador_nome', 'razaosocialtomador', 'xnome_dest'],
         
         # VALORES
         'Vlr_Bruto': ['valorservicos', 'vserv', 'vlrserv', 'valorbruto', 'v_serv', 'vlr_serv', 'v_nf'],
@@ -63,8 +63,8 @@ def simplify_and_filter(df):
         'IRRF_Retido': ['valorir', 'vir', 'irrf_retido', 'virrf', 'v_ir'],
         'CSLL_Retido': ['valorcsll', 'vcsll', 'csll_retido', 'v_csll'],
         
-        # DESCRIÇÃO
-        'Servico_Descricao': ['discriminacao', 'xserv', 'infadic', 'desc_serv', 'infCpl', 'xprod']
+        # DESCRIÇÃO (Ajuste Fino)
+        'Servico_Descricao': ['discriminacao', 'xserv', 'infadic', 'desc_serv', 'infcpl', 'xprod', 'servico_discriminacao', 'det_xprod', 'detalheservico']
     }
 
     for friendly_name, radicals in targets.items():
@@ -72,14 +72,17 @@ def simplify_and_filter(df):
         for col in df.columns:
             c_low = col.lower()
             if any(rad in c_low for rad in radicals):
-                # Proteção para não trocar Prestador por Tomador
+                # Filtro de Contexto Rígido
                 if 'prestador' in friendly_name.lower() or 'emit' in friendly_name.lower():
                     if 'tomador' in c_low or 'dest' in c_low: continue
-                if 'tomador' in friendly_name.lower() or 'dest' in friendly_name.lower():
-                    if 'prestador' in c_low or 'emit' in c_low: continue
                 
-                # Ignora endereços
-                if not any(x in c_low for x in ['endereco', 'logradouro', 'uf', 'cep', 'bairro', 'municipio']):
+                if 'tomador' in friendly_name.lower() or 'dest' in friendly_name.lower():
+                    # Para Tomador, a coluna PRECISA ter um radical de tomador/dest e NÃO de prestador/emit
+                    if not any(x in c_low for x in ['tomador', 'dest', 'destinatario']): continue
+                    if any(x in c_low for x in ['prestador', 'emit']): continue
+                
+                # Ignora endereços para não pegar CNPJ errado
+                if not any(x in c_low for x in ['endereco', 'logradouro', 'uf', 'cep', 'bairro', 'municipio', 'cidade']):
                     if found_series is None or found_series.isnull().all():
                         found_series = df[col]
 
@@ -87,7 +90,7 @@ def simplify_and_filter(df):
             if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL']):
                 final_df_data[friendly_name] = pd.to_numeric(found_series, errors='coerce').fillna(0.0)
             else:
-                final_df_data[friendly_name] = found_series.fillna("Dado Ausente")
+                final_df_data[friendly_name] = found_series.fillna("Não Identificado")
         else:
             final_df_data[friendly_name] = 0.0 if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL']) else "NÃO LOCALIZADO"
 
@@ -132,12 +135,12 @@ def process_files(uploaded_files):
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria Fiscal: Mapeamento de XMLs (Nacional e Mercadorias)")
+    st.subheader("Auditoria Fiscal: Mapeamento de Tomadores e Descrições")
 
     uploaded_files = st.file_uploader("Upload de XML ou ZIP", type=["xml", "zip"], accept_multiple_files=True)
 
     if uploaded_files:
-        with st.spinner('Refinando captura de Emitentes e Destinatários...'):
+        with st.spinner('Refinando captura de dados críticos...'):
             df_raw = process_files(uploaded_files)
         
         if not df_raw.empty:
@@ -159,11 +162,11 @@ def main():
             st.download_button(
                 label="📥 Baixar Excel de Auditoria",
                 data=output.getvalue(),
-                file_name="portal_servtax_concluido.xlsx",
+                file_name="portal_servtax_auditoria.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            st.warning("Nenhum dado encontrado.")
+            st.warning("Nenhum dado encontrado nos arquivos.")
 
 if __name__ == "__main__":
     main()
