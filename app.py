@@ -39,17 +39,17 @@ def flatten_dict(d, parent_key='', sep='_'):
 
 def simplify_and_filter(df):
     """
-    Motor de Equivalência: Se não encontrar a tag de SP, busca a Nacional.
-    Garante que todas as prefeituras apareçam linha a linha no Excel.
+    Motor de Possibilidades: Varre as tags técnicas de SP e Nacional (DPS)
+    para garantir o preenchimento total da planilha linha a linha.
     """
     final_df_data = {}
     if 'Arquivo_Origem' in df.columns:
         final_df_data['Arquivo'] = df['Arquivo_Origem']
 
-    # MAPEAMENTO DE POSSIBILIDADES (SOMASES de Tags)
+    # MAPEAMENTO DE POSSIBILIDADES (Onde o código testa as tags dos seus XMLs)
     mapping = {
         'Nota_Numero': ['nNFSe', 'NumeroNFe', 'nNF', 'numero'],
-        'Data_Emissao': ['dhProc', 'DataEmissaoNFe', 'dhEmi', 'dataemissao', 'DataEmissao'],
+        'Data_Emissao': ['dhEmi', 'DataEmissaoNFe', 'dhProc', 'DataEmissao', 'dEmi'],
         
         # PRESTADOR
         'Prestador_CNPJ': ['emit_CNPJ', 'CPFCNPJPrestador_CNPJ', 'CNPJPrestador', 'emit_CPF'],
@@ -63,11 +63,11 @@ def simplify_and_filter(df):
         'Vlr_Bruto': ['vServ', 'ValorServicos', 'vNF', 'v_serv', 'vServPrest_vServ'],
         
         # IMPOSTOS
-        'ISS_Valor': ['vISSRet', 'ValorISS', 'vISSQN', 'ValorISS_Retido', 'vISS'],
-        'PIS_Retido': ['vPIS', 'ValorPIS', 'pis_retido'],
-        'COFINS_Retido': ['vCOFINS', 'ValorCOFINS', 'cofins_retido'],
-        'IRRF_Retido': ['vIR', 'ValorIR', 'ir_retido'],
-        'CSLL_Retido': ['vCSLL', 'ValorCSLL', 'csll_retido'],
+        'ISS_Valor': ['vISSQN', 'ValorISS', 'vISSRet', 'ValorISS_Retido', 'vISS'],
+        'PIS_Retido': ['vPIS', 'ValorPIS', 'pis_retido', 'vPIS_Ret'],
+        'COFINS_Retido': ['vCOFINS', 'ValorCOFINS', 'cofins_retido', 'vCOFINS_Ret'],
+        'IRRF_Retido': ['vIR', 'ValorIR', 'ir_retido', 'vIR_Ret'],
+        'CSLL_Retido': ['vCSLL', 'ValorCSLL', 'csll_retido', 'vCSLL_Ret'],
         
         # DESCRIÇÃO
         'Servico_Descricao': ['xDescServ', 'Discriminacao', 'xServ', 'infCpl', 'xProd']
@@ -76,14 +76,14 @@ def simplify_and_filter(df):
     for friendly_name, tags in mapping.items():
         found_series = None
         for col in df.columns:
-            # Verifica se o final da coluna bate com alguma das tags (ignora maiúsculas)
+            # Verifica se a coluna termina com a tag técnica ignorando maiúsculas
             if any(col.lower().endswith(t.lower()) for t in tags):
-                # Filtro de Contexto (Evita misturar Prestador com Tomador)
+                # Filtro de Contexto: Prestador não lê Tomador e vice-versa
                 if 'Prestador' in friendly_name and ('tomador' in col.lower() or 'toma' in col.lower() or 'dest' in col.lower()): continue
                 if 'Tomador' in friendly_name and ('prestador' in col.lower() or 'emit' in col.lower()): continue
                 
-                # Só preenche se encontrar dados reais
                 current_series = df[col]
+                # Pega a primeira coluna que contiver dados reais
                 if found_series is None or (isinstance(found_series, pd.Series) and found_series.isnull().all()):
                     found_series = current_series
 
@@ -91,9 +91,9 @@ def simplify_and_filter(df):
             if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL']):
                 final_df_data[friendly_name] = pd.to_numeric(found_series, errors='coerce').fillna(0.0)
             else:
-                final_df_data[friendly_name] = found_series.fillna("N/A")
+                final_df_data[friendly_name] = found_series.fillna("")
         else:
-            final_df_data[friendly_name] = 0.0 if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL']) else "N/A"
+            final_df_data[friendly_name] = 0.0 if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL']) else ""
 
     return pd.DataFrame(final_df_data)
 
@@ -122,7 +122,7 @@ def process_files(uploaded_files):
     for item in all_data:
         try:
             data_dict = xmltodict.parse(item['content'])
-            # Normalização: ignora o nó raiz para unificar nomes de colunas
+            # Normalização de Nó: Entra direto na estrutura útil do XML
             if isinstance(data_dict, dict):
                 root = list(data_dict.keys())[0]
                 flat = flatten_dict(data_dict[root])
@@ -133,18 +133,18 @@ def process_files(uploaded_files):
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria Fiscal: Mapeamento São Paulo & Nacional")
+    st.subheader("Auditoria Fiscal: Motor Unificado de Tags")
 
     uploaded_files = st.file_uploader("Upload de XML ou ZIP", type=["xml", "zip"], accept_multiple_files=True)
 
     if uploaded_files:
-        with st.spinner('Unificando todos os layouts no Excel...'):
+        with st.spinner('A processar equivalências SP & Nacional...'):
             df_raw = process_files(uploaded_files)
         
         if not df_raw.empty:
             df_final = simplify_and_filter(df_raw)
 
-            st.success(f"Notas processadas: {len(df_final)}")
+            st.success(f"Concluído! {len(df_final)} notas processadas.")
             st.dataframe(df_final)
 
             output = io.BytesIO()
@@ -160,11 +160,11 @@ def main():
             st.download_button(
                 label="📥 Baixar Excel de Auditoria Completo",
                 data=output.getvalue(),
-                file_name="portal_servtax_auditoria.xlsx",
+                file_name="auditoria_servtax_completa.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            st.warning("Nenhum dado encontrado.")
+            st.warning("Nenhum dado encontrado nos arquivos.")
 
 if __name__ == "__main__":
     main()
