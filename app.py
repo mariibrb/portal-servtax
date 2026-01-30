@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import xmltodict
 import io
+import zipfile
+import os
 
 # Configuração da Página
 st.set_page_config(page_title="Portal ServTax", layout="wide", page_icon="📑")
@@ -43,10 +45,7 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 def flatten_dict(d, parent_key='', sep='_'):
-    """
-    Processa o dicionário do XML de forma recursiva para garantir que todas
-    as tags aninhadas tornem-se colunas individuais.
-    """
+    """Processa o dicionário do XML para colunas individuais."""
     items = []
     for k, v in d.items():
         new_key = f"{parent_key}{sep}{k}" if parent_key else k
@@ -62,67 +61,76 @@ def flatten_dict(d, parent_key='', sep='_'):
             items.append((new_key, v))
     return dict(items)
 
-def process_xml_files(uploaded_files):
+def extract_xml_from_zip(zip_data, extracted_list):
     """
-    Lê os arquivos enviados, converte para dicionário e achata a estrutura.
+    Função recursiva para abrir ZIPs dentro de ZIPs e encontrar XMLs.
     """
-    extracted_data = []
+    with zipfile.ZipFile(io.BytesIO(zip_data)) as z:
+        for file_info in z.infolist():
+            # Se for um XML, lê o conteúdo
+            if file_info.filename.lower().endswith('.xml'):
+                with z.open(file_info.filename) as xml_file:
+                    extracted_list.append({
+                        'name': file_info.filename,
+                        'content': xml_file.read()
+                    })
+            # Se for outro ZIP (recursividade de arquivo)
+            elif file_info.filename.lower().endswith('.zip'):
+                with z.open(file_info.filename) as inner_zip:
+                    extract_xml_from_zip(inner_zip.read(), extracted_list)
+
+def process_files(uploaded_files):
+    """Lê arquivos diretos e processa ZIPs recursivamente."""
+    xml_contents = []
     
     for uploaded_file in uploaded_files:
+        fname = uploaded_file.name.lower()
+        content = uploaded_file.read()
+        
+        if fname.endswith('.xml'):
+            xml_contents.append({'name': uploaded_file.name, 'content': content})
+        elif fname.endswith('.zip'):
+            extract_xml_from_zip(content, xml_contents)
+            
+    extracted_data = []
+    for xml_item in xml_contents:
         try:
-            # Garante a leitura do início do arquivo
-            uploaded_file.seek(0)
-            content = uploaded_file.read()
-            
-            # Converte XML para Dicionário
-            data_dict = xmltodict.parse(content)
-            
-            # Achata todas as tags (Recursividade total)
+            data_dict = xmltodict.parse(xml_item['content'])
             flat_data = flatten_dict(data_dict)
-            
-            # Adiciona o nome do arquivo para referência
-            flat_data['arquivo_origem'] = uploaded_file.name
+            flat_data['arquivo_origem'] = xml_item['name']
             extracted_data.append(flat_data)
         except Exception as e:
-            st.error(f"Erro ao processar {uploaded_file.name}: {e}")
+            st.error(f"Erro ao converter {xml_item['name']}: {e}")
             
-    if extracted_data:
-        return pd.DataFrame(extracted_data)
-    return pd.DataFrame()
+    return pd.DataFrame(extracted_data)
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Processamento de NFS-e Nacional (Extração Integral de Tags)")
+    st.subheader("Processamento Integral: XMLs e ZIPs (incluindo ZIP dentro de ZIP)")
     
     st.markdown("""
     ---
-    ### Passo a Passo:
-    1. Faça o upload de um ou mais arquivos **XML** de NFS-e.
-    2. O sistema lerá **todas** as tags disponíveis no arquivo automaticamente.
-    3. Visualize a tabela gerada abaixo.
-    4. Clique no botão de download para gerar o arquivo **Excel**.
+    ### Como Funciona:
+    * **Suporta:** XMLs avulsos, arquivos ZIP simples e **ZIPs aninhados**.
+    * **Extração:** Lê todas as tags de serviço do padrão nacional.
+    * **Download:** Gera uma planilha única com tudo consolidado.
     ---
     """)
 
-    # Componente de Upload
     uploaded_files = st.file_uploader(
-        "Arraste os arquivos XML aqui", 
-        type=["xml"], 
+        "Arraste XMLs ou arquivos ZIP aqui", 
+        type=["xml", "zip"], 
         accept_multiple_files=True
     )
 
     if uploaded_files:
-        with st.spinner('Processando arquivos...'):
-            df = process_xml_files(uploaded_files)
+        with st.spinner('Minerando arquivos e extraindo tags...'):
+            df = process_files(uploaded_files)
         
         if not df.empty:
-            st.success(f"Sucesso! {len(df)} notas processadas.")
-            
-            # Preview dos dados
-            st.write("### Visualização dos Dados Extraídos")
+            st.success(f"Sucesso! {len(df)} notas fiscais encontradas no total.")
             st.dataframe(df)
 
-            # Geração do Excel
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                 df.to_excel(writer, index=False, sheet_name='PortalServTax_Dados')
@@ -130,13 +138,13 @@ def main():
             excel_data = output.getvalue()
 
             st.download_button(
-                label="📥 Baixar Dados em Excel",
+                label="📥 Baixar Consolidação em Excel",
                 data=excel_data,
-                file_name="portal_servtax_export.xlsx",
+                file_name="portal_servtax_consolidado.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            st.warning("Nenhum dado válido foi extraído dos XMLs enviados.")
+            st.warning("Nenhum XML foi encontrado nos arquivos enviados.")
 
 if __name__ == "__main__":
     main()
