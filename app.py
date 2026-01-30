@@ -25,8 +25,6 @@ def get_xml_value(root, tags):
     Ignora namespaces para garantir leitura universal.
     """
     for tag in tags:
-        # O prefixo .// permite encontrar a tag em qualquer profundidade
-        # O prefixo {*} ignora namespaces técnicos (ex: ns2:, nfs:, sp:)
         element = root.find(f".//{{*}}{tag}")
         if element is None:
             element = root.find(f".//{tag}")
@@ -40,8 +38,7 @@ def process_xml_file(content, filename):
         tree = ET.parse(io.BytesIO(content))
         root = tree.getroot()
         
-        # FLAGS DE VERIFICAÇÃO (ISSRetido e tpRetISSQN)
-        # Capturamos o texto das tags que indicam se houve retenção ou não
+        # FLAGS DE VERIFICAÇÃO (Padrão Antigo vs Padrão Nacional)
         iss_retido_flag = get_xml_value(root, ['ISSRetido']).lower()
         tp_ret_flag = get_xml_value(root, ['tpRetISSQN'])
         
@@ -76,12 +73,16 @@ def process_xml_file(content, filename):
             'Descricao': get_xml_value(root, ['CodigoServico', 'itemServico', 'cServ', 'xDescServ', 'Discriminacao', 'xServ', 'infCpl', 'xProd'])
         }
 
-        # BLINDAGEM DO ISS RETIDO (Regra: se a flag for falsa ou tpRet for 1, o retido é ZERO)
-        if iss_retido_flag == 'false' or tp_ret_flag == '1':
-            row['Ret_ISS'] = "0.00"
+        # NOVA LÓGICA DE BLINDAGEM INTELIGENTE
+        # Se tpRetISSQN for 2 (Nacional) OU ISSRetido for true (Antigo), a retenção é lida.
+        # Se for false E tpRet for 1 (ou vazio), o retido é ZERO.
+        if tp_ret_flag == '2' or iss_retido_flag == 'true':
+             row['Ret_ISS'] = get_xml_value(root, ['vTotTribMun', 'vISSRetido', 'ValorISS_Retido', 'vRetISS', 'vISSRet', 'iss/vRet'])
+        elif iss_retido_flag == 'false' or tp_ret_flag == '1':
+             row['Ret_ISS'] = "0.00"
         else:
-            # Caso contrário, o sistema busca as tags de retenção mapeadas
-            row['Ret_ISS'] = get_xml_value(root, ['vTotTribMun', 'vISSRetido', 'ValorISS_Retido', 'vRetISS', 'vISSRet', 'iss/vRet'])
+             # Fallback para notas que não trazem a flag mas trazem o valor
+             row['Ret_ISS'] = get_xml_value(root, ['vTotTribMun', 'vISSRetido', 'ValorISS_Retido', 'vRetISS', 'vISSRet', 'iss/vRet'])
 
         return row
     except:
@@ -89,7 +90,7 @@ def process_xml_file(content, filename):
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria Fiscal: Blindagem de ISS Retido com Respeito às Flags de Isenção")
+    st.subheader("Auditoria Fiscal: Mapeamento Universal de Retenção (SP & Nacional)")
 
     uploaded_files = st.file_uploader("Upload de XML ou ZIP", type=["xml", "zip"], accept_multiple_files=True)
 
