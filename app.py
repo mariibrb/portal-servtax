@@ -3,49 +3,24 @@ import pandas as pd
 import xmltodict
 import io
 import zipfile
-import os
 
 # Configuração da Página
 st.set_page_config(page_title="Portal ServTax", layout="wide", page_icon="📑")
 
-# Aplicação do Padrão Visual (Estilo Rihanna)
+# Estilo Visual (Rihanna) - Rosa e Branco
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&family=Plus+Jakarta+Sans:wght@400;700&display=swap');
-
-    html, body, [class*="css"] {
-        font-family: 'Plus Jakarta Sans', sans-serif;
-    }
-
-    h1, h2, h3 {
-        font-family: 'Montserrat', sans-serif;
-        color: #FF69B4;
-    }
-
-    .stButton>button {
-        background-color: #FF69B4;
-        color: white;
-        border-radius: 10px;
-        border: none;
-        padding: 10px 20px;
-        font-weight: bold;
-    }
-
-    .stButton>button:hover {
-        background-color: #FFDEEF;
-        color: #FF69B4;
-        border: 1px solid #FF69B4;
-    }
-
-    [data-testid="stFileUploadDropzone"] {
-        border: 2px dashed #FF69B4;
-        background-color: #FFDEEF;
-    }
+    html, body, [class*="css"] { font-family: 'Plus Jakarta Sans', sans-serif; }
+    h1, h2, h3 { font-family: 'Montserrat', sans-serif; color: #FF69B4; }
+    .stButton>button { background-color: #FF69B4; color: white; border-radius: 10px; border: none; font-weight: bold; width: 100%; }
+    .stButton>button:hover { background-color: #FFDEEF; color: #FF69B4; border: 1px solid #FF69B4; }
+    [data-testid="stFileUploadDropzone"] { border: 2px dashed #FF69B4; background-color: #FFDEEF; }
     </style>
     """, unsafe_allow_html=True)
 
 def flatten_dict(d, parent_key='', sep='_'):
-    """Processa o dicionário do XML para colunas individuais."""
+    """Transforma o XML aninhado em colunas lineares."""
     items = []
     for k, v in d.items():
         new_key = f"{parent_key}{sep}{k}" if parent_key else k
@@ -62,34 +37,23 @@ def flatten_dict(d, parent_key='', sep='_'):
     return dict(items)
 
 def extract_xml_from_zip(zip_data, extracted_list):
-    """
-    Função recursiva para abrir ZIPs dentro de ZIPs e encontrar XMLs.
-    """
+    """Extração recursiva de ZIPs dentro de ZIPs."""
     with zipfile.ZipFile(io.BytesIO(zip_data)) as z:
         for file_info in z.infolist():
-            # Se for um XML, lê o conteúdo
             if file_info.filename.lower().endswith('.xml'):
                 with z.open(file_info.filename) as xml_file:
-                    extracted_list.append({
-                        'name': file_info.filename,
-                        'content': xml_file.read()
-                    })
-            # Se for outro ZIP (recursividade de arquivo)
+                    extracted_list.append({'name': file_info.filename, 'content': xml_file.read()})
             elif file_info.filename.lower().endswith('.zip'):
                 with z.open(file_info.filename) as inner_zip:
                     extract_xml_from_zip(inner_zip.read(), extracted_list)
 
 def process_files(uploaded_files):
-    """Lê arquivos diretos e processa ZIPs recursivamente."""
     xml_contents = []
-    
     for uploaded_file in uploaded_files:
-        fname = uploaded_file.name.lower()
         content = uploaded_file.read()
-        
-        if fname.endswith('.xml'):
+        if uploaded_file.name.lower().endswith('.xml'):
             xml_contents.append({'name': uploaded_file.name, 'content': content})
-        elif fname.endswith('.zip'):
+        elif uploaded_file.name.lower().endswith('.zip'):
             extract_xml_from_zip(content, xml_contents)
             
     extracted_data = []
@@ -99,52 +63,67 @@ def process_files(uploaded_files):
             flat_data = flatten_dict(data_dict)
             flat_data['arquivo_origem'] = xml_item['name']
             extracted_data.append(flat_data)
-        except Exception as e:
-            st.error(f"Erro ao converter {xml_item['name']}: {e}")
-            
+        except:
+            continue
     return pd.DataFrame(extracted_data)
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Processamento Integral: XMLs e ZIPs (incluindo ZIP dentro de ZIP)")
-    
+    st.subheader("Auditoria Fiscal: Conferência de Retenções e Reforma Tributária")
+
     st.markdown("""
-    ---
-    ### Como Funciona:
-    * **Suporta:** XMLs avulsos, arquivos ZIP simples e **ZIPs aninhados**.
-    * **Extração:** Lê todas as tags de serviço do padrão nacional.
-    * **Download:** Gera uma planilha única com tudo consolidado.
-    ---
+    Este módulo realiza a leitura completa de **todas as tags** e exporta as colunas essenciais para conferência de 
+    escrituração (PIS, COFINS, CSLL, IR, ISS, além de IBS e CBS).
     """)
 
-    uploaded_files = st.file_uploader(
-        "Arraste XMLs ou arquivos ZIP aqui", 
-        type=["xml", "zip"], 
-        accept_multiple_files=True
-    )
+    uploaded_files = st.file_uploader("Selecione os arquivos XML ou ZIP", type=["xml", "zip"], accept_multiple_files=True)
 
     if uploaded_files:
-        with st.spinner('Minerando arquivos e extraindo tags...'):
-            df = process_files(uploaded_files)
+        with st.spinner('Minerando dados fiscais...'):
+            df_total = process_files(uploaded_files)
         
-        if not df.empty:
-            st.success(f"Sucesso! {len(df)} notas fiscais encontradas no total.")
-            st.dataframe(df)
+        if not df_total.empty:
+            # Lista mestre para auditoria (ordenada logicamente)
+            colunas_auditoria = [
+                'arquivo_origem', 'Numero', 'DataEmissao', 'ChaveAcesso',
+                'Prestador_CpfCnpj', 'Prestador_RazaoSocial',
+                'Tomador_CpfCnpj', 'Tomador_RazaoSocial',
+                'Valores_ValorServicos', 'Valores_ValorLiquidoNfse',
+                'Valores_ValorIss', 'Valores_IssRetido', 'Valores_Aliquota',
+                'Valores_ValorPis', 'Valores_ValorCofins', 'Valores_ValorIr', 'Valores_ValorCsll',
+                'IBS_Valor', 'CBS_Valor', 'IBS_Aliquota', 'CBS_Aliquota', 
+                'NBS', 'Cclass', 'ItemListaServico', 'Discriminacao'
+            ]
+            
+            # Garante que apenas as colunas que existem no XML apareçam
+            colunas_finais = [c for c in colunas_auditoria if c in df_total.columns]
+            df_final = df_total[colunas_finais]
 
+            st.success(f"Notas processadas para auditoria: {len(df_final)}")
+            
+            # Preview rápido
+            st.dataframe(df_final.head(10))
+
+            # Preparação do Excel
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                df.to_excel(writer, index=False, sheet_name='PortalServTax_Dados')
-            
-            excel_data = output.getvalue()
+                df_final.to_excel(writer, index=False, sheet_name='Auditoria_Fiscal')
+                
+                # Ajuste automático de colunas no Excel
+                workbook = writer.book
+                worksheet = writer.sheets['Auditoria_Fiscal']
+                for i, col in enumerate(df_final.columns):
+                    column_len = max(df_final[col].astype(str).str.len().max(), len(col)) + 2
+                    worksheet.set_column(i, i, column_len)
 
             st.download_button(
-                label="📥 Baixar Consolidação em Excel",
-                data=excel_data,
-                file_name="portal_servtax_consolidado.xlsx",
+                label="📥 Baixar Planilha para Conferência",
+                data=output.getvalue(),
+                file_name="conferencia_fiscal_servtax.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            st.warning("Nenhum XML foi encontrado nos arquivos enviados.")
+            st.warning("Nenhum dado XML foi encontrado nos arquivos enviados.")
 
 if __name__ == "__main__":
     main()
