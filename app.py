@@ -39,57 +39,56 @@ def flatten_dict(d, parent_key='', sep='_'):
 
 def simplify_and_filter(df):
     """
-    Motor de Equivalência: Mapeia os dois padrões de XML (Nacional e SP) 
-    para as mesmas colunas na planilha final.
+    Motor de Equivalência de Alta Precisão: Mapeia padrões SP e Nacional 
+    ignorando a profundidade do nó (root) do XML.
     """
     final_df_data = {}
     if 'Arquivo_Origem' in df.columns:
         final_df_data['Arquivo'] = df['Arquivo_Origem']
 
-    # Mapeamento Baseado nos arquivos enviados (SP vs Nacional)
+    # Mapeamento de Radicais baseado nos seus arquivos reais
     mapping = {
-        'Nota_Numero': ['nNFSe', 'NumeroNFe', 'nNF', 'numero'],
-        'Data_Emissao': ['dhProc', 'DataEmissaoNFe', 'DataEmissao', 'dhEmi'],
+        'Nota_Numero': ['nnfse', 'numeronfe', 'nnf', 'numero'],
+        'Data_Emissao': ['dhproc', 'dataemissaonfe', 'dataemissao', 'dhemi'],
         
-        # PRESTADOR (Equivalência Emit vs Prestador SP)
-        'Prestador_CNPJ': ['emit_CNPJ', 'CPFCNPJPrestador_CNPJ', 'CNPJPrestador', 'prestador_cnpj'],
-        'Prestador_Razao': ['emit_xNome', 'RazaoSocialPrestador', 'xNomePrestador', 'prestador_razao'],
+        # PRESTADOR
+        'Prestador_CNPJ': ['emit_cnpj', 'cpfcnpjprestador_cnpj', 'cnpjprestador', 'prest_cnpj'],
+        'Prestador_Razao': ['emit_xnome', 'razaosocialprestador', 'xnomeprestador', 'prest_xnome'],
         
-        # TOMADOR (Equivalência Toma vs Tomador SP)
-        'Tomador_CNPJ': ['toma_CNPJ', 'CPFCNPJTomador_CNPJ', 'CPFCNPJTomador_CPF', 'toma_CPF', 'CNPJTomador'],
-        'Tomador_Razao': ['toma_xNome', 'RazaoSocialTomador', 'xNomeTomador', 'dest_xNome', 'tomador_razao'],
+        # TOMADOR
+        'Tomador_CNPJ': ['toma_cnpj', 'cpfcnpjtomador_cnpj', 'cpfcnpjtomador_cpf', 'toma_cpf', 'cnpjtomador'],
+        'Tomador_Razao': ['toma_xnome', 'razaosocialtomador', 'xnometomador', 'dest_xnome'],
         
-        # VALORES (vServ no Nacional / ValorServicos em SP)
-        'Vlr_Bruto': ['vServ', 'ValorServicos', 'valorbruto', 'v_serv', 'vNF'],
+        # VALORES
+        'Vlr_Bruto': ['vserv', 'valorservicos', 'valorbruto', 'v_serv', 'vnf'],
         
-        # RETENÇÕES (vISSRet / vPIS no Nacional / ValorISS em SP)
-        'ISS_Valor': ['vISSRet', 'ValorISS', 'iss_retido', 'vISSQN'],
-        'PIS_Retido': ['vPIS', 'ValorPIS', 'pis_retido'],
-        'COFINS_Retido': ['vCOFINS', 'ValorCOFINS', 'cofins_retido'],
-        'IRRF_Retido': ['vIR', 'ValorIR', 'ir_retido'],
-        'CSLL_Retido': ['vCSLL', 'ValorCSLL', 'csll_retido'],
+        # IMPOSTOS
+        'ISS_Valor': ['vissqn', 'valoriss', 'viss', 'valoriss_retido'],
+        'PIS_Retido': ['vpis', 'valorpis', 'pis_retido'],
+        'COFINS_Retido': ['vcofins', 'valorcofins', 'cofins_retido'],
+        'IRRF_Retido': ['vir', 'valorir', 'ir_retido'],
+        'CSLL_Retido': ['vcsll', 'valorcsll', 'csll_retido'],
         
-        # DESCRIÇÃO (xDescServ no Nacional / Discriminacao em SP)
-        'Servico_Descricao': ['xDescServ', 'Discriminacao', 'xServ', 'infCpl', 'xProd']
+        # SERVIÇO
+        'Servico_Descricao': ['xdescserv', 'discriminacao', 'xserv', 'infcpl', 'xprod']
     }
 
     for friendly_name, radicals in mapping.items():
         found_series = None
         for col in df.columns:
-            # Busca ignorando maiúsculas e minúsculas
             col_lower = col.lower()
-            if any(col_lower.endswith(rad.lower()) for rad in radicals):
-                # Proteção para não misturar Prestador com Tomador
-                if 'Prestador' in friendly_name and ('tomador' in col_lower or 'toma' in col_lower): continue
-                if 'Tomador' in friendly_name and ('prestador' in col_lower or 'emit' in col_lower): continue
+            # Verifica se o radical está contido em qualquer parte do nome da coluna
+            if any(rad in col_lower for rad in radicals):
+                # Filtro de Contexto (Evita cruzar Prestador com Tomador)
+                if 'prestador' in friendly_name.lower() and ('tomador' in col_lower or 'toma' in col_lower or 'dest' in col_lower): continue
+                if 'tomador' in friendly_name.lower() and ('prestador' in col_lower or 'emit' in col_lower or 'prest' in col_lower): continue
                 
-                # Pega a primeira coluna válida com dados
+                # Se achou uma coluna com dados, prioriza ela
                 current_col = df[col]
                 if found_series is None or (isinstance(found_series, pd.Series) and found_series.isnull().all()):
                     found_series = current_col
 
         if found_series is not None:
-            # Converte valores financeiros
             if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL']):
                 final_df_data[friendly_name] = pd.to_numeric(found_series, errors='coerce').fillna(0.0)
             else:
@@ -124,16 +123,15 @@ def process_files(uploaded_files):
     for item in all_extracted_data:
         try:
             data_dict = xmltodict.parse(item['content'])
-            # Trata se o xmltodict retornar uma lista ou dict único
-            if isinstance(data_dict, list):
-                for sub_item in data_dict:
-                    flat = flatten_dict(sub_item)
-                    flat['Arquivo_Origem'] = item['name']
-                    final_rows.append(flat)
-            else:
-                flat_data = flatten_dict(data_dict)
-                flat_data['Arquivo_Origem'] = item['name']
-                final_rows.append(flat_data)
+            # Normaliza o dicionário: remove o nó raiz (NFe, NFSe, RetornoConsulta) para unificar
+            if isinstance(data_dict, dict):
+                root_keys = list(data_dict.keys())
+                if root_keys:
+                    # Pega o conteúdo de dentro da primeira tag raiz encontrada
+                    content_dict = data_dict[root_keys[0]]
+                    flat_data = flatten_dict(content_dict)
+                    flat_data['Arquivo_Origem'] = item['name']
+                    final_rows.append(flat_data)
         except: continue
     return pd.DataFrame(final_rows)
 
