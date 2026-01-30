@@ -39,51 +39,54 @@ def flatten_dict(d, parent_key='', sep='_'):
 
 def simplify_and_filter(df):
     """
-    Motor de Equivalência de Múltiplas Possibilidades.
-    Cada coluna tenta uma lista de tags técnicas identificadas nos XMLs.
+    Motor de Possibilidades de Leitura:
+    Varre a lista de tags técnicas para preencher cada coluna do Excel.
     """
     final_df_data = {}
     if 'Arquivo_Origem' in df.columns:
         final_df_data['Arquivo'] = df['Arquivo_Origem']
 
-    # MAPEAMENTO DE POSSIBILIDADES (O "SOMASES" de tags para preenchimento)
+    # MAPEAMENTO DE POSSIBILIDADES (Equivalências Técnicas)
     mapping = {
-        'Nota_Numero': ['nNFSe', 'NumeroNFe', 'nNF', 'NumeroNFe'],
+        # Coluna B: Número da Nota (Possibilidades identificadas nos seus arquivos)
+        'Nota_Numero': ['nNFSe', 'NumeroNFe', 'nNF', 'numero'],
+        
+        # Data de Emissão
         'Data_Emissao': ['dhProc', 'DataEmissaoNFe', 'dhEmi', 'DataEmissao'],
         
-        # PRESTADOR (Tags de SP e do Bloco Nacional 'emit')
-        'Prestador_CNPJ': ['emit_CNPJ', 'CPFCNPJPrestador_CNPJ', 'CNPJPrestador', 'emit_CPF'],
-        'Prestador_Razao': ['emit_xNome', 'RazaoSocialPrestador', 'xNomePrestador', 'emit_razao'],
+        # Prestador
+        'Prestador_CNPJ': ['emit_CNPJ', 'CPFCNPJPrestador_CNPJ', 'CNPJPrestador'],
+        'Prestador_Razao': ['emit_xNome', 'RazaoSocialPrestador', 'xNomePrestador'],
         
-        # TOMADOR (Tags de SP e do Bloco Nacional 'toma')
-        'Tomador_CNPJ': ['toma_CNPJ', 'CPFCNPJTomador_CNPJ', 'CPFCNPJTomador_CPF', 'toma_CPF', 'CPFCNPJTomador_CpfCnpj_CNPJ'],
-        'Tomador_Razao': ['toma_xNome', 'RazaoSocialTomador', 'dest_xNome', 'xNomeTomador', 'RazaoSocialTomador'],
+        # Tomador
+        'Tomador_CNPJ': ['toma_CNPJ', 'CPFCNPJTomador_CNPJ', 'CPFCNPJTomador_CPF', 'dest_CNPJ'],
+        'Tomador_Razao': ['toma_xNome', 'RazaoSocialTomador', 'dest_xNome', 'xNomeTomador'],
         
-        # VALORES (Tags Nacional vs SP)
+        # Valores
         'Vlr_Bruto': ['vServ', 'ValorServicos', 'vNF', 'v_serv', 'vServPrest_vServ'],
         
-        # IMPOSTOS E RETENÇÕES
-        'ISS_Valor': ['vISSRet', 'ValorISS', 'vISSQN', 'ValorISS_Retido', 'vISS'],
-        'PIS_Retido': ['vPIS', 'ValorPIS', 'pis_retido', 'vPIS_Ret'],
-        'COFINS_Retido': ['vCOFINS', 'ValorCOFINS', 'cofins_retido', 'vCOFINS_Ret'],
-        'IRRF_Retido': ['vIR', 'ValorIR', 'ir_retido', 'vIR_Ret'],
-        'CSLL_Retido': ['vCSLL', 'ValorCSLL', 'csll_retido', 'vCSLL_Ret'],
+        # Impostos
+        'ISS_Valor': ['vISSRet', 'ValorISS', 'vISSQN', 'ValorISS_Retido'],
+        'PIS_Retido': ['vPIS', 'ValorPIS', 'pis_retido'],
+        'COFINS_Retido': ['vCOFINS', 'ValorCOFINS', 'cofins_retido'],
+        'IRRF_Retido': ['vIR', 'ValorIR', 'ir_retido'],
+        'CSLL_Retido': ['vCSLL', 'ValorCSLL', 'csll_retido'],
         
-        # DESCRIÇÃO
+        # Descrição
         'Servico_Descricao': ['xDescServ', 'Discriminacao', 'xServ', 'infCpl', 'xProd']
     }
 
     for friendly_name, tags in mapping.items():
         found_series = None
         for col in df.columns:
-            # Verifica se o nome da coluna termina exatamente com a tag técnica (achatada)
+            # Verifica se a coluna termina com uma das tags técnicas mapeadas
             if any(col.endswith(tag) for tag in tags):
-                # Filtro de Contexto Fiscal: Evita que Prestador leia dados do Tomador
+                # Proteção para não misturar Prestador com Tomador
                 if 'Prestador' in friendly_name and ('Tomador' in col or 'toma' in col or 'dest' in col): continue
                 if 'Tomador' in friendly_name and ('Prestador' in col or 'emit' in col): continue
                 
+                # Se encontrar a coluna, verifica se ela tem dados válidos
                 current_series = df[col]
-                # Se encontrar a coluna e ela tiver dados (não for nula), preenche a célula
                 if found_series is None or (isinstance(found_series, pd.Series) and found_series.isnull().all()):
                     found_series = current_series
 
@@ -110,59 +113,58 @@ def extract_xml_from_zip(zip_data, extracted_list):
     except: pass
 
 def process_files(uploaded_files):
-    all_data = []
+    all_extracted_data = []
     for uploaded_file in uploaded_files:
         content = uploaded_file.read()
         if uploaded_file.name.lower().endswith('.xml'):
-            all_data.append({'name': uploaded_file.name, 'content': content})
+            all_extracted_data.append({'name': uploaded_file.name, 'content': content})
         elif uploaded_file.name.lower().endswith('.zip'):
-            extract_xml_from_zip(content, all_data)
+            extract_xml_from_zip(content, all_extracted_data)
             
     final_rows = []
-    for item in all_data:
+    for item in all_extracted_data:
         try:
             data_dict = xmltodict.parse(item['content'])
-            # Trata se o XML for uma lista ou objeto único
             if isinstance(data_dict, list):
-                for sub in data_dict:
-                    flat = flatten_dict(sub)
+                for sub_item in data_dict:
+                    flat = flatten_dict(sub_item)
                     flat['Arquivo_Origem'] = item['name']
                     final_rows.append(flat)
             else:
-                flat = flatten_dict(data_dict)
-                flat['Arquivo_Origem'] = item['name']
-                final_rows.append(flat)
+                flat_data = flatten_dict(data_dict)
+                flat_data['Arquivo_Origem'] = item['name']
+                final_rows.append(flat_data)
         except: continue
     return pd.DataFrame(final_rows)
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria Fiscal: Múltiplas Possibilidades de Tags")
+    st.subheader("Auditoria Fiscal: Mapeamento de Múltiplas Tags")
 
     uploaded_files = st.file_uploader("Upload de XML ou ZIP", type=["xml", "zip"], accept_multiple_files=True)
 
     if uploaded_files:
-        with st.spinner('Lendo todas as possibilidades de tags...'):
+        with st.spinner('Processando possibilidades de leitura...'):
             df_raw = process_files(uploaded_files)
         
         if not df_raw.empty:
             df_final = simplify_and_filter(df_raw)
 
-            st.success(f"Sucesso! {len(df_final)} notas processadas.")
+            st.success(f"Total de {len(df_final)} notas processadas.")
             st.dataframe(df_final)
 
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                df_final.to_excel(writer, index=False, sheet_name='Auditoria_ServTax')
+                df_final.to_excel(writer, index=False, sheet_name='PortalServTax')
                 workbook = writer.book
-                worksheet = writer.sheets['Auditoria_ServTax']
+                worksheet = writer.sheets['PortalServTax']
                 header_fmt = workbook.add_format({'bold': True, 'bg_color': '#FF69B4', 'font_color': 'white', 'border': 1})
                 for i, col in enumerate(df_final.columns):
                     worksheet.write(0, i, col, header_fmt)
                     worksheet.set_column(i, i, 25)
 
             st.download_button(
-                label="📥 Baixar Excel de Auditoria Completo",
+                label="📥 Baixar Excel de Auditoria",
                 data=output.getvalue(),
                 file_name="portal_servtax_auditoria.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
