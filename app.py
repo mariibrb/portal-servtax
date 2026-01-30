@@ -38,25 +38,29 @@ def flatten_dict(d, parent_key='', sep='_'):
 
 def simplify_and_filter(df):
     """
-    Filtra colunas essenciais usando busca por radical para evitar valores 'None'.
+    Filtra colunas essenciais de auditoria, incluindo tags de valores retidos.
     """
-    # Mapeamento por radicais (mais chance de acerto em diferentes padrões de prefeitura)
     mapping = {
         'Nota_Numero': ['numero', 'nfnr', 'numnf'],
         'Data_Emissao': ['dataemissao', 'dtemic', 'dtrem'],
         'Prestador_CNPJ': ['prestador_cnpj', 'prestador_cpfcnpj', 'prestador_identificacao'],
-        'Prestador_Razao': ['prestador_razãosocial', 'prestador_xnome'],
+        'Prestador_Razao': ['prestador_razãosocial', 'prestador_xnome', 'prestador_razão'],
         'Tomador_CNPJ': ['tomador_cnpj', 'tomador_cpfcnpj', 'tomador_identificacao'],
-        'Tomador_Razao': ['tomador_razãosocial', 'tomador_xnome'],
-        'Vlr_Bruto': ['valorservicos', 'vserv', 'vlrserv'],
-        'Vlr_Liquido': ['valorliquido', 'vliq'],
-        'ISS': ['valoriss', 'viss'],
-        'PIS': ['valorpis', 'vpis'],
-        'COFINS': ['valorcofins', 'vcofins'],
-        'IRRF': ['valorir', 'vir'],
-        'CSLL': ['valorcsll', 'vcsll'],
-        'IBS': ['ibs_vlr', 'ibs_valor'],
-        'CBS': ['cbs_vlr', 'cbs_valor'],
+        'Tomador_Razao': ['tomador_razãosocial', 'tomador_xnome', 'tomador_razão'],
+        'Vlr_Bruto': ['valorservicos', 'vserv', 'vlrserv', 'valorbruto'],
+        'Vlr_Liquido': ['valorliquido', 'vliq', 'vlrliq'],
+        # Impostos Totais / Alíquotas
+        'ISS_Total': ['valoriss', 'viss'],
+        'ISS_Retido': ['issretido', 'vissret', 'iss_retido'],
+        'PIS_Total': ['valorpis', 'vpis'],
+        'PIS_Retido': ['pisretido', 'vpisret', 'pis_retido'],
+        'COFINS_Total': ['valorcofins', 'vcofins'],
+        'COFINS_Retido': ['cofinsretido', 'vcofinsret', 'cofins_retido'],
+        'IRRF_Retido': ['valorir', 'vir', 'irrf_retido', 'virrf'],
+        'CSLL_Retido': ['valorcsll', 'vcsll', 'csll_retido'],
+        # Reforma Tributária
+        'IBS_Valor': ['ibs_vlr', 'ibs_valor'],
+        'CBS_Valor': ['cbs_vlr', 'cbs_valor'],
         'Servico_Descricao': ['discriminacao', 'xserv', 'infadic']
     }
 
@@ -64,21 +68,20 @@ def simplify_and_filter(df):
     if 'Arquivo_Origem' in df.columns:
         final_df_data['Arquivo'] = df['Arquivo_Origem']
 
-    # Para cada coluna que desejamos no Excel final
     for friendly_name, radicals in mapping.items():
-        # Procura nas colunas reais do DataFrame por algum radical
         found_col = None
         for col in df.columns:
+            # Verifica se algum radical está no nome da coluna (ignora case)
             if any(rad in col.lower() for rad in radicals):
-                # Bloqueio de endereços para não pegar CNPJ de endereço por erro
-                if not any(x in col.lower() for x in ['endereco', 'logradouro', 'uf', 'cep']):
+                # Filtro extra para evitar endereços
+                if not any(x in col.lower() for x in ['endereco', 'logradouro', 'uf', 'cep', 'bairro']):
                     found_col = col
                     break
         
         if found_col:
             final_df_data[friendly_name] = df[found_col]
         else:
-            final_df_data[friendly_name] = "Não encontrado"
+            final_df_data[friendly_name] = "0.00" # Padrão para valores não encontrados
 
     return pd.DataFrame(final_df_data)
 
@@ -114,12 +117,12 @@ def process_files(uploaded_files):
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria Fiscal: Captura Inteligente de Dados")
+    st.subheader("Auditoria de Retenções Fiscais (Padrão Nacional)")
 
-    uploaded_files = st.file_uploader("Suba seus XMLs ou ZIPs", type=["xml", "zip"], accept_multiple_files=True)
+    uploaded_files = st.file_uploader("Upload de XML ou ZIP (incluindo pastas compactadas)", type=["xml", "zip"], accept_multiple_files=True)
 
     if uploaded_files:
-        with st.spinner('Mapeando tags fiscais...'):
+        with st.spinner('Analisando retenções e impostos...'):
             df_raw = process_files(uploaded_files)
         
         if not df_raw.empty:
@@ -127,22 +130,32 @@ def main():
 
             st.success(f"Notas processadas: {len(df_final)}")
             
-            # Mostra o resultado final
-            st.write("### Dados para Conferência")
+            st.write("### Tabela para Conferência de Escrituração")
             st.dataframe(df_final)
 
+            # Geração do Excel formatado
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                df_final.to_excel(writer, index=False, sheet_name='PortalServTax')
-            
+                df_final.to_excel(writer, index=False, sheet_name='Auditoria_Fisc')
+                
+                # Ajuste de colunas no Excel
+                workbook = writer.book
+                worksheet = writer.sheets['Auditoria_Fisc']
+                header_format = workbook.add_format({'bold': True, 'bg_color': '#FFDEEF', 'border': 1})
+                
+                for col_num, value in enumerate(df_final.columns.values):
+                    worksheet.write(0, col_num, value, header_format)
+                    column_len = max(df_final[value].astype(str).str.len().max(), len(value)) + 2
+                    worksheet.set_column(col_num, col_num, min(column_len, 40))
+
             st.download_button(
-                label="📥 Baixar Planilha de Auditoria",
+                label="📥 Baixar Planilha de Retenções",
                 data=output.getvalue(),
-                file_name="auditoria_portal_servtax.xlsx",
+                file_name="portal_servtax_retencoes.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            st.warning("Nenhum arquivo XML detectado.")
+            st.warning("Nenhum arquivo XML válido foi encontrado.")
 
 if __name__ == "__main__":
     main()
