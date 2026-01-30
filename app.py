@@ -40,7 +40,7 @@ def process_xml_file(content, filename):
         tree = ET.parse(io.BytesIO(content))
         root = tree.getroot()
         
-        # MAPEAMENTO DE POSSIBILIDADES (Ajuste apenas nas Razões Sociais e CNPJs)
+        # MAPEAMENTO DE POSSIBILIDADES
         row = {
             'Arquivo': filename,
             
@@ -50,11 +50,11 @@ def process_xml_file(content, filename):
             # Data de Emissão
             'Data_Emissao': get_xml_value(root, ['dhProc', 'dhEmi', 'DataEmissaoNFe', 'DataEmissao']),
             
-            # PRESTADOR (Tags para CNPJ e Razão Social - SP e Nacional)
+            # PRESTADOR (Ajuste solicitado no bloco de Razão Social)
             'Prestador_CNPJ': get_xml_value(root, ['emit/CNPJ', 'CPFCNPJPrestador/CNPJ', 'CNPJPrestador', 'emit_CNPJ', 'CPFCNPJPrestador/CPF', 'CNPJ']),
-            'Prestador_Razao': get_xml_value(root, ['RazaoSocialPrestador', 'emit/xNome', 'xNomePrestador', 'emit_xNome', 'RazaoSocial']),
+            'Prestador_Razao': get_xml_value(root, ['emit/xNome', 'RazaoSocialPrestador', 'xNomePrestador', 'emit_xNome', 'RazaoSocial', 'xNome']),
             
-            # TOMADOR (Tags para CNPJ e Razão Social - SP e Nacional)
+            # TOMADOR
             'Tomador_CNPJ': get_xml_value(root, ['toma/CNPJ', 'CPFCNPJTomador/CNPJ', 'CPFCNPJTomador/CPF', 'dest/CNPJ', 'CNPJTomador', 'toma/CPF', 'tom/CNPJ']),
             'Tomador_Razao': get_xml_value(root, ['toma/xNome', 'RazaoSocialTomador', 'dest/xNome', 'xNomeTomador', 'RazaoSocialTomador', 'tom/xNome']),
             
@@ -117,7 +117,7 @@ def main():
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            st.error("Erro: Nenhum dado capturado nos ficheiros.")
+            st.error("Nenhum dado capturado nos ficheiros.")
 
 if __name__ == "__main__":
     main()
