@@ -42,20 +42,18 @@ def simplify_and_filter(df):
     if 'Arquivo_Origem' in df.columns:
         final_df_data['Arquivo'] = df['Arquivo_Origem']
 
-    # MAPEAMENTO REFINADO - FOCO EM TOMADOR E DESCRIÇÃO
+    # MAPEAMENTO EXTREMO - FOCO TOTAL EM TOMADOR E DESCRIÇÃO
     targets = {
         'Nota_Numero': ['numero', 'nnfse', 'numnf', 'nfnr', 'notafiscal', 'nnf'],
         'Data_Emissao': ['dataemissao', 'dtemic', 'dtrem', 'dhemi', 'dtaemi', 'datahora', 'dh_emi', 'dtemit'],
         
-        # PRESTADOR / EMITENTE (Estável)
-        'Prestador_CNPJ': ['prestador_cnpj', 'prestador_cpfcnpj', 'emit_cnpj', 'emit_cpf', 'identificacaoprestador_cnpj'],
-        'Prestador_Razao': ['prestador_razaosocial', 'prestador_xnome', 'emit_xnome', 'emit_razao', 'emit_nome'],
+        'Prestador_CNPJ': ['prestador_cnpj', 'prestador_cpfcnpj', 'emit_cnpj', 'emit_cpf', 'prestador_id'],
+        'Prestador_Razao': ['prestador_razaosocial', 'prestador_xnome', 'emit_xnome', 'emit_razao', 'prestador_nome'],
         
-        # TOMADOR / DESTINATÁRIO (Ajuste Fino)
-        'Tomador_CNPJ': ['tomador_cnpj', 'tomador_cpfcnpj', 'dest_cnpj', 'dest_cpf', 'identificacaotomador_cnpj', 'tomador_id_cnpj', 'dest_id_cnpj', 'cpf_cnpj_tomador'],
-        'Tomador_Razao': ['tomador_razaosocial', 'tomador_xnome', 'dest_xnome', 'dest_razao', 'dest_nome', 'tomador_nome', 'razaosocialtomador', 'xnome_dest'],
+        # Ajuste Fino Crítico: Tomador
+        'Tomador_CNPJ': ['tomador_cnpj', 'tomador_cpfcnpj', 'dest_cnpj', 'dest_cpf', 'tomador_id', 'cnpj_tomador', 'cpf_tomador'],
+        'Tomador_Razao': ['tomador_razaosocial', 'tomador_xnome', 'dest_xnome', 'dest_razao', 'tomador_nome', 'razaosocial_tomador', 'xnome_dest'],
         
-        # VALORES
         'Vlr_Bruto': ['valorservicos', 'vserv', 'vlrserv', 'valorbruto', 'v_serv', 'vlr_serv', 'v_nf'],
         'ISS_Retido': ['issretido', 'vissret', 'iss_retido', 'valoriss', 'viss'],
         'PIS_Retido': ['pisretido', 'vpisret', 'pis_retido', 'valorpis', 'vpis'],
@@ -63,28 +61,45 @@ def simplify_and_filter(df):
         'IRRF_Retido': ['valorir', 'vir', 'irrf_retido', 'virrf', 'v_ir'],
         'CSLL_Retido': ['valorcsll', 'vcsll', 'csll_retido', 'v_csll'],
         
-        # DESCRIÇÃO (Ajuste Fino)
-        'Servico_Descricao': ['discriminacao', 'xserv', 'infadic', 'desc_serv', 'infcpl', 'xprod', 'servico_discriminacao', 'det_xprod', 'detalheservico']
+        # Ajuste Fino Crítico: Descrição
+        'Servico_Descricao': ['discriminacao', 'xserv', 'infadic', 'desc_serv', 'infcpl', 'xprod', 'det_xprod', 'txt_servico', 'servico_descricao']
     }
 
     for friendly_name, radicals in targets.items():
         found_series = None
+        
+        # Busca 1: Estruturada (Caminho completo)
         for col in df.columns:
             c_low = col.lower()
             if any(rad in c_low for rad in radicals):
-                # Filtro de Contexto Rígido
+                # Filtro Prestador vs Tomador
                 if 'prestador' in friendly_name.lower() or 'emit' in friendly_name.lower():
                     if 'tomador' in c_low or 'dest' in c_low: continue
-                
                 if 'tomador' in friendly_name.lower() or 'dest' in friendly_name.lower():
-                    # Para Tomador, a coluna PRECISA ter um radical de tomador/dest e NÃO de prestador/emit
-                    if not any(x in c_low for x in ['tomador', 'dest', 'destinatario']): continue
-                    if any(x in c_low for x in ['prestador', 'emit']): continue
+                    if 'prestador' in c_low or 'emit' in c_low: continue
                 
-                # Ignora endereços para não pegar CNPJ errado
-                if not any(x in c_low for x in ['endereco', 'logradouro', 'uf', 'cep', 'bairro', 'municipio', 'cidade']):
-                    if found_series is None or found_series.isnull().all():
+                # Bloqueio de Endereços
+                if not any(x in c_low for x in ['endereco', 'logradouro', 'uf', 'cep', 'bairro', 'municipio']):
+                    if found_series is None or (isinstance(found_series, pd.Series) and found_series.isnull().all()):
                         found_series = df[col]
+
+        # Busca 2: Emergência (Se ainda estiver None, busca em qualquer lugar da string)
+        if found_series is None or (isinstance(found_series, pd.Series) and found_series.isnull().all()):
+            for col in df.columns:
+                c_low = col.lower()
+                # Para Tomador CNPJ, por exemplo, procura qualquer coluna que tenha 'tomador' E 'cnpj'
+                if 'tomador' in friendly_name.lower() and 'cnpj' in friendly_name.lower():
+                    if 'tomador' in c_low and ('cnpj' in c_low or 'cpf' in c_low):
+                        found_series = df[col]
+                        break
+                if 'tomador' in friendly_name.lower() and 'razao' in friendly_name.lower():
+                    if 'tomador' in c_low and ('razao' in c_low or 'nome' in c_low or 'xnome' in c_low):
+                        found_series = df[col]
+                        break
+                if 'descricao' in friendly_name.lower():
+                    if any(x in c_low for x in ['discrim', 'xserv', 'infadic', 'servico']):
+                        found_series = df[col]
+                        break
 
         if found_series is not None:
             if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL']):
@@ -140,7 +155,7 @@ def main():
     uploaded_files = st.file_uploader("Upload de XML ou ZIP", type=["xml", "zip"], accept_multiple_files=True)
 
     if uploaded_files:
-        with st.spinner('Refinando captura de dados críticos...'):
+        with st.spinner('Garimpando dados em todas as camadas do arquivo...'):
             df_raw = process_files(uploaded_files)
         
         if not df_raw.empty:
@@ -166,7 +181,7 @@ def main():
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            st.warning("Nenhum dado encontrado nos arquivos.")
+            st.warning("Nenhum dado encontrado nos arquivos enviados.")
 
 if __name__ == "__main__":
     main()
