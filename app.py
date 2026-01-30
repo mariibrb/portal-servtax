@@ -39,60 +39,59 @@ def flatten_dict(d, parent_key='', sep='_'):
 
 def simplify_and_filter(df):
     """
-    Motor de Equivalência de Alta Precisão: Mapeia padrões SP e Nacional 
-    ignorando a profundidade do nó (root) do XML.
+    Motor de Busca Profunda: Varre todas as combinações possíveis de nomes de colunas
+    para garantir que os dados de SP e Nacional sejam unificados.
     """
     final_df_data = {}
     if 'Arquivo_Origem' in df.columns:
         final_df_data['Arquivo'] = df['Arquivo_Origem']
 
-    # Mapeamento de Radicais baseado nos seus arquivos reais
-    mapping = {
-        'Nota_Numero': ['nnfse', 'numeronfe', 'nnf', 'numero'],
-        'Data_Emissao': ['dhproc', 'dataemissaonfe', 'dataemissao', 'dhemi'],
+    # Regras de Captura: O que a coluna DEVE ter e o que NÃO PODE ter
+    rules = {
+        'Nota_Numero': {'must': [['numero', 'nfe'], ['nnfse'], ['nnf']], 'not': []},
+        'Data_Emissao': {'must': [['data', 'emissao'], ['dhproc'], ['dhemi']], 'not': []},
         
-        # PRESTADOR
-        'Prestador_CNPJ': ['emit_cnpj', 'cpfcnpjprestador_cnpj', 'cnpjprestador', 'prest_cnpj'],
-        'Prestador_Razao': ['emit_xnome', 'razaosocialprestador', 'xnomeprestador', 'prest_xnome'],
+        'Prestador_CNPJ': {'must': [['prestador', 'cnpj'], ['emit', 'cnpj'], ['prestador', 'cpf']], 'not': ['tomador', 'dest']},
+        'Prestador_Razao': {'must': [['prestador', 'razao'], ['emit', 'xnome'], ['prestador', 'nome']], 'not': ['tomador', 'dest']},
         
-        # TOMADOR
-        'Tomador_CNPJ': ['toma_cnpj', 'cpfcnpjtomador_cnpj', 'cpfcnpjtomador_cpf', 'toma_cpf', 'cnpjtomador'],
-        'Tomador_Razao': ['toma_xnome', 'razaosocialtomador', 'xnometomador', 'dest_xnome'],
+        'Tomador_CNPJ': {'must': [['tomador', 'cnpj'], ['toma', 'cnpj'], ['dest', 'cnpj'], ['tomador', 'cpf']], 'not': ['prestador', 'emit']},
+        'Tomador_Razao': {'must': [['tomador', 'razao'], ['toma', 'xnome'], ['dest', 'xnome'], ['tomador', 'nome']], 'not': ['prestador', 'emit']},
         
-        # VALORES
-        'Vlr_Bruto': ['vserv', 'valorservicos', 'valorbruto', 'v_serv', 'vnf'],
+        'Vlr_Bruto': {'must': [['valorservicos'], ['vserv'], ['valorbruto'], ['vlrbruto'], ['vnf']], 'not': ['retido']},
         
-        # IMPOSTOS
-        'ISS_Valor': ['vissqn', 'valoriss', 'viss', 'valoriss_retido'],
-        'PIS_Retido': ['vpis', 'valorpis', 'pis_retido'],
-        'COFINS_Retido': ['vcofins', 'valorcofins', 'cofins_retido'],
-        'IRRF_Retido': ['vir', 'valorir', 'ir_retido'],
-        'CSLL_Retido': ['vcsll', 'valorcsll', 'csll_retido'],
+        'ISS_Retido': {'must': [['iss', 'retido'], ['vissret'], ['valoriss']], 'not': []},
+        'PIS_Retido': {'must': [['pis', 'retido'], ['vpis'], ['valorpis']], 'not': []},
+        'COFINS_Retido': {'must': [['cofins', 'retido'], ['vcofins'], ['valorcofins']], 'not': []},
+        'IRRF_Retido': {'must': [['ir', 'retido'], ['vir'], ['valorir'], ['virrf']], 'not': []},
+        'CSLL_Retido': {'must': [['csll', 'retido'], ['vcsll'], ['valorcsll']], 'not': []},
         
-        # SERVIÇO
-        'Servico_Descricao': ['xdescserv', 'discriminacao', 'xserv', 'infcpl', 'xprod']
+        'Servico_Descricao': {'must': [['discriminacao'], ['xdescserv'], ['xserv'], ['infcpl'], ['xprod']], 'not': []}
     }
 
-    for friendly_name, radicals in mapping.items():
+    for friendly_name, condition in rules.items():
         found_series = None
         for col in df.columns:
-            col_lower = col.lower()
-            # Verifica se o radical está contido em qualquer parte do nome da coluna
-            if any(rad in col_lower for rad in radicals):
-                # Filtro de Contexto (Evita cruzar Prestador com Tomador)
-                if 'prestador' in friendly_name.lower() and ('tomador' in col_lower or 'toma' in col_lower or 'dest' in col_lower): continue
-                if 'tomador' in friendly_name.lower() and ('prestador' in col_lower or 'emit' in col_lower or 'prest' in col_lower): continue
-                
-                # Se achou uma coluna com dados, prioriza ela
-                current_col = df[col]
-                if found_series is None or (isinstance(found_series, pd.Series) and found_series.isnull().all()):
-                    found_series = current_col
+            c_low = col.lower()
+            
+            # Verifica se a coluna atende a um dos grupos de "must"
+            match_must = False
+            for group in condition['must']:
+                if all(word in c_low for word in group):
+                    match_must = True
+                    break
+            
+            if match_must:
+                # Verifica se a coluna NÃO contém palavras proibidas
+                if not any(word in c_low for word in condition['not']):
+                    # Se achou uma coluna que não está vazia, fixa ela
+                    if found_series is None or (isinstance(found_series, pd.Series) and found_series.isnull().all()):
+                        found_series = df[col]
 
         if found_series is not None:
             if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL']):
                 final_df_data[friendly_name] = pd.to_numeric(found_series, errors='coerce').fillna(0.0)
             else:
-                final_df_data[friendly_name] = found_series.fillna("Dado Ausente")
+                final_df_data[friendly_name] = found_series.fillna("Não Identificado")
         else:
             final_df_data[friendly_name] = 0.0 if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL']) else "NÃO LOCALIZADO"
 
@@ -111,44 +110,44 @@ def extract_xml_from_zip(zip_data, extracted_list):
     except: pass
 
 def process_files(uploaded_files):
-    all_extracted_data = []
+    all_data = []
     for uploaded_file in uploaded_files:
         content = uploaded_file.read()
         if uploaded_file.name.lower().endswith('.xml'):
-            all_extracted_data.append({'name': uploaded_file.name, 'content': content})
+            all_data.append({'name': uploaded_file.name, 'content': content})
         elif uploaded_file.name.lower().endswith('.zip'):
-            extract_xml_from_zip(content, all_extracted_data)
+            extract_xml_from_zip(content, all_data)
             
     final_rows = []
-    for item in all_extracted_data:
+    for item in all_data:
         try:
             data_dict = xmltodict.parse(item['content'])
-            # Normaliza o dicionário: remove o nó raiz (NFe, NFSe, RetornoConsulta) para unificar
-            if isinstance(data_dict, dict):
-                root_keys = list(data_dict.keys())
-                if root_keys:
-                    # Pega o conteúdo de dentro da primeira tag raiz encontrada
-                    content_dict = data_dict[root_keys[0]]
-                    flat_data = flatten_dict(content_dict)
-                    flat_data['Arquivo_Origem'] = item['name']
-                    final_rows.append(flat_data)
+            if isinstance(data_dict, list):
+                for sub in data_dict:
+                    flat = flatten_dict(sub)
+                    flat['Arquivo_Origem'] = item['name']
+                    final_rows.append(flat)
+            else:
+                flat = flatten_dict(data_dict)
+                flat['Arquivo_Origem'] = item['name']
+                final_rows.append(flat)
         except: continue
     return pd.DataFrame(final_rows)
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria Fiscal: Motor Unificado SP & Nacional")
+    st.subheader("Auditoria Fiscal Total: SP & Nacional")
 
     uploaded_files = st.file_uploader("Upload de XML ou ZIP", type=["xml", "zip"], accept_multiple_files=True)
 
     if uploaded_files:
-        with st.spinner('Consolidando dados dos diferentes modelos de nota...'):
+        with st.spinner('Consolidando dados...'):
             df_raw = process_files(uploaded_files)
         
         if not df_raw.empty:
             df_final = simplify_and_filter(df_raw)
 
-            st.success(f"Sucesso! {len(df_final)} notas processadas.")
+            st.success(f"Processadas: {len(df_final)} notas.")
             st.dataframe(df_final)
 
             output = io.BytesIO()
@@ -162,13 +161,13 @@ def main():
                     worksheet.set_column(i, i, 25)
 
             st.download_button(
-                label="📥 Baixar Excel de Auditoria Unificado",
+                label="📥 Baixar Excel de Auditoria",
                 data=output.getvalue(),
                 file_name="portal_servtax_auditoria.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            st.warning("Nenhum dado válido encontrado.")
+            st.warning("Nenhum dado encontrado.")
 
 if __name__ == "__main__":
     main()
