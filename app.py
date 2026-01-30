@@ -7,7 +7,7 @@ import zipfile
 # Configuração da Página
 st.set_page_config(page_title="Portal ServTax", layout="wide", page_icon="📑")
 
-# Estilo Rihanna
+# Estilo Rihanna (Rosa e Branco)
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&family=Plus+Jakarta+Sans:wght@400;700&display=swap');
@@ -39,67 +39,58 @@ def flatten_dict(d, parent_key='', sep='_'):
 
 def simplify_and_filter(df):
     """
-    Motor de Busca por Intersecção: Localiza os campos ignorando a estrutura de pastas
-    do XML de cada prefeitura, corrigindo NameErrors.
+    Define as colunas da planilha baseada nas tags exatas encontradas nos arquivos.
     """
     final_df_data = {}
     if 'Arquivo_Origem' in df.columns:
         final_df_data['Arquivo'] = df['Arquivo_Origem']
 
-    # Regras de intersecção baseadas nos seus XMLs reais (Nacional e SP)
-    rules = {
-        'Nota_Numero': [['numero', 'nfe'], ['nnfse'], ['nnf'], ['nNF']],
-        'Data_Emissao': [['data', 'emissao'], ['dhproc'], ['dhemi'], ['datahora']],
+    # MAPEAMENTO POR TAGS EXATAS (Sufixos do achatamento)
+    mapping = {
+        'Nota_Numero': ['nNFSe', 'NumeroNFe', 'nNF'],
+        'Data_Emissao': ['dhProc', 'DataEmissaoNFe', 'dhEmi'],
         
         # PRESTADOR
-        'Prestador_CNPJ': [['prestador', 'cnpj'], ['emit', 'cnpj'], ['prestador', 'cpf']],
-        'Prestador_Razao': [['prestador', 'razao'], ['emit', 'xnome'], ['prestador', 'nome'], ['emit', 'razao']],
+        'Prestador_CNPJ': ['emit_CNPJ', 'CPFCNPJPrestador_CNPJ', 'CNPJPrestador'],
+        'Prestador_Razao': ['emit_xNome', 'RazaoSocialPrestador', 'xNomePrestador'],
         
-        # TOMADOR
-        'Tomador_CNPJ': [['tomador', 'cnpj'], ['toma', 'cnpj'], ['dest', 'cnpj'], ['tomador', 'cpf']],
-        'Tomador_Razao': [['tomador', 'razao'], ['toma', 'xnome'], ['dest', 'xnome'], ['tomador', 'nome']],
+        # TOMADOR (Onde estava falhando)
+        'Tomador_CNPJ': ['toma_CNPJ', 'CPFCNPJTomador_CNPJ', 'CPFCNPJTomador_CPF', 'dest_CNPJ'],
+        'Tomador_Razao': ['toma_xNome', 'RazaoSocialTomador', 'dest_xNome', 'xNomeTomador'],
         
-        # VALORES
-        'Vlr_Bruto': [['valorservicos'], ['vserv'], ['valorbruto'], ['vlrbruto'], ['vnf']],
-        
-        # IMPOSTOS
-        'ISS_Valor': [['iss', 'valor'], ['viss'], ['valoriss'], ['iss', 'retido']],
-        'PIS_Retido': [['pis', 'retido'], ['vpis'], ['valorpis']],
-        'COFINS_Retido': [['cofins', 'retido'], ['vcofins'], ['valorcofins']],
-        'IRRF_Retido': [['ir', 'retido'], ['vir'], ['valorir'], ['virrf']],
-        'CSLL_Retido': [['csll', 'retido'], ['vcsll'], ['valorcsll']],
+        # VALORES E IMPOSTOS
+        'Vlr_Bruto': ['vServ', 'ValorServicos', 'vNF', 'v_serv'],
+        'ISS_Retido': ['vISSRet', 'ValorISS', 'vISSQN', 'ISSRetido'],
+        'PIS_Retido': ['vPIS', 'ValorPIS', 'pis_retido'],
+        'COFINS_Retido': ['vCOFINS', 'ValorCOFINS', 'cofins_retido'],
+        'IRRF_Retido': ['vIR', 'ValorIR', 'ir_retido'],
+        'CSLL_Retido': ['vCSLL', 'ValorCSLL', 'csll_retido'],
         
         # DESCRIÇÃO
-        'Servico_Descricao': [['discriminacao'], ['xdescserv'], ['xserv'], ['infcpl'], ['xprod']]
+        'Servico_Descricao': ['xDescServ', 'Discriminacao', 'xServ', 'infCpl', 'xProd']
     }
 
-    for friendly_name, condition_groups in rules.items():
+    for friendly_name, tags in mapping.items():
         found_series = None
         for col in df.columns:
-            c_low = col.lower()
-            
-            # Verifica se a coluna possui TODAS as palavras de um dos grupos
-            for group in condition_groups:
-                if all(word in c_low for word in group):
-                    # Filtro de segurança: não misturar Prestador com Tomador
-                    if 'prestador' in friendly_name.lower() and ('tomador' in c_low or 'toma' in c_low or 'dest' in c_low):
-                        continue
-                    if 'tomador' in friendly_name.lower() and ('prestador' in c_low or 'emit' in c_low):
-                        continue
-                    
-                    # Prioriza a coluna que tiver dados preenchidos
-                    current_series = df[col]
-                    if found_series is None or (isinstance(found_series, pd.Series) and found_series.isnull().all()):
-                        found_series = current_series
-                        break
+            # Verifica se a coluna termina EXATAMENTE com uma das tags mapeadas
+            if any(col.endswith(tag) for tag in tags):
+                # Filtro para não trocar Prestador por Tomador
+                if 'Prestador' in friendly_name and ('Tomador' in col or 'toma' in col or 'dest' in col): continue
+                if 'Tomador' in friendly_name and ('Prestador' in col or 'emit' in col): continue
+                
+                # Se encontrar a coluna, verifica se ela tem dados
+                current_series = df[col]
+                if found_series is None or (isinstance(found_series, pd.Series) and found_series.isnull().all()):
+                    found_series = current_series
 
         if found_series is not None:
             if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL']):
                 final_df_data[friendly_name] = pd.to_numeric(found_series, errors='coerce').fillna(0.0)
             else:
-                final_df_data[friendly_name] = found_series.fillna("Dado Ausente")
+                final_df_data[friendly_name] = found_series.fillna("Não Localizado")
         else:
-            final_df_data[friendly_name] = 0.0 if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL']) else "NÃO LOCALIZADO"
+            final_df_data[friendly_name] = 0.0 if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL']) else "Não Localizado"
 
     return pd.DataFrame(final_df_data)
 
@@ -128,32 +119,33 @@ def process_files(uploaded_files):
     for item in all_extracted_data:
         try:
             data_dict = xmltodict.parse(item['content'])
+            # Processa se for lista de notas ou nota única
             if isinstance(data_dict, list):
-                for sub_item in data_dict:
-                    flat = flatten_dict(sub_item)
+                for sub in data_dict:
+                    flat = flatten_dict(sub)
                     flat['Arquivo_Origem'] = item['name']
                     final_rows.append(flat)
             else:
-                flat_data = flatten_dict(data_dict)
-                flat_data['Arquivo_Origem'] = item['name']
-                final_rows.append(flat_data)
+                flat = flatten_dict(data_dict)
+                flat['Arquivo_Origem'] = item['name']
+                final_rows.append(flat)
         except: continue
     return pd.DataFrame(final_rows)
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria Fiscal: Motor Unificado SP & Nacional")
+    st.subheader("Auditoria Fiscal: Mapeamento Direto por Tags")
 
     uploaded_files = st.file_uploader("Upload de XML ou ZIP", type=["xml", "zip"], accept_multiple_files=True)
 
     if uploaded_files:
-        with st.spinner('Unificando dados dos arquivos...'):
+        with st.spinner('Lendo tags estruturadas...'):
             df_raw = process_files(uploaded_files)
         
         if not df_raw.empty:
             df_final = simplify_and_filter(df_raw)
 
-            st.success(f"Sucesso! {len(df_final)} notas processadas.")
+            st.success(f"Notas processadas: {len(df_final)}")
             st.dataframe(df_final)
 
             output = io.BytesIO()
@@ -167,13 +159,13 @@ def main():
                     worksheet.set_column(i, i, 25)
 
             st.download_button(
-                label="📥 Baixar Excel de Auditoria Unificado",
+                label="📥 Baixar Excel de Auditoria",
                 data=output.getvalue(),
                 file_name="portal_servtax_auditoria.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            st.warning("Nenhum dado encontrado.")
+            st.warning("Nenhum dado encontrado nos arquivos.")
 
 if __name__ == "__main__":
     main()
