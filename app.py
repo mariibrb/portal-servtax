@@ -19,105 +19,96 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-def get_tag_value(element, tag_name):
+def get_xml_value(root, tags):
     """
-    Busca uma tag ignorando namespaces (curinga {*}).
+    Busca em Cascata com XPath: tenta cada tag da lista em qualquer nível do XML.
+    Ignora namespaces para garantir leitura universal.
     """
-    if element is None: return ""
-    # Procura a tag em qualquer nível abaixo do elemento atual
-    found = element.find(f".//{{*}}{tag_name}")
-    if found is None:
-        # Tenta busca simples caso não haja namespace
-        found = element.find(f".//{tag_name}")
-    return found.text.strip() if found is not None and found.text else ""
+    for tag in tags:
+        # O prefixo .// permite encontrar a tag em qualquer profundidade
+        # O prefixo {*} ignora namespaces técnicos (ex: ns2:, nfs:)
+        element = root.find(f".//{{*}}{tag}")
+        if element is None:
+            element = root.find(f".//{tag}")
+        
+        if element is not None and element.text:
+            return element.text.strip()
+    return ""
 
-def process_xml_content(content, filename):
+def process_xml_file(content, filename):
     try:
-        root = ET.fromstring(content)
+        tree = ET.parse(io.BytesIO(content))
+        root = tree.getroot()
         
-        # Identificação das Partes (Blocos Principais)
-        # Nacional usa <emit> e <toma> / <tom>
-        # SP usa <CPFCNPJPrestador> e <CPFCNPJTomador>
-        
+        # MAPEAMENTO DE POSSIBILIDADES (Ajuste Fino: Razão Social)
         row = {
             'Arquivo': filename,
-            'Nota_Numero': get_tag_value(root, 'nNFSe') or get_tag_value(root, 'NumeroNFe') or get_tag_value(root, 'nNF'),
-            'Data_Emissao': get_tag_value(root, 'dhProc') or get_tag_value(root, 'dhEmi') or get_tag_value(root, 'DataEmissaoNFe'),
             
-            # PRESTADOR
-            'Prestador_CNPJ': get_tag_value(root, 'emit') if get_tag_value(root, 'emit') else "", # Fallback
-            'Prestador_Razao': get_tag_value(root, 'RazaoSocialPrestador') or ""
+            # Número da Nota
+            'Nota_Numero': get_xml_value(root, ['nNFSe', 'NumeroNFe', 'nNF', 'numero']),
+            
+            # Data de Emissão
+            'Data_Emissao': get_xml_value(root, ['dhProc', 'dhEmi', 'DataEmissaoNFe', 'DataEmissao']),
+            
+            # PRESTADOR (Razão Social - Possibilidades SP e Nacional)
+            'Prestador_CNPJ': get_xml_value(root, ['emit/CNPJ', 'CPFCNPJPrestador/CNPJ', 'CNPJPrestador', 'emit_CNPJ']),
+            'Prestador_Razao': get_xml_value(root, ['RazaoSocialPrestador', 'emit/xNome', 'xNomePrestador', 'emit_xNome', 'RazaoSocial']),
+            
+            # TOMADOR (Razão Social - Possibilidades SP e Nacional)
+            'Tomador_CNPJ': get_xml_value(root, ['toma/CNPJ', 'CPFCNPJTomador/CNPJ', 'CPFCNPJTomador/CPF', 'dest/CNPJ', 'CNPJTomador']),
+            'Tomador_Razao': get_xml_value(root, ['toma/xNome', 'RazaoSocialTomador', 'dest/xNome', 'xNomeTomador', 'RazaoSocialTomador']),
+            
+            # Valores e Impostos
+            'Vlr_Bruto': get_xml_value(root, ['vServ', 'ValorServicos', 'vNF', 'vServPrest/vServ']),
+            'ISS_Retido': get_xml_value(root, ['vISSRet', 'ValorISS', 'vISSQN', 'ValorISS_Retido']),
+            
+            # Descrição do Serviço
+            'Descricao': get_xml_value(root, ['xDescServ', 'Discriminacao', 'xServ', 'infCpl'])
         }
-        
-        # Ajuste Fino para Prestador (CNPJ e Razão)
-        emit_block = root.find(".//{* }emit") or root.find(".//emit")
-        if emit_block is not None:
-            row['Prestador_CNPJ'] = get_tag_value(emit_block, 'CNPJ') or get_tag_value(emit_block, 'CPF')
-            row['Prestador_Razao'] = get_tag_value(emit_block, 'xNome')
-        else:
-            # Caso SP
-            row['Prestador_CNPJ'] = get_tag_value(root, 'CPFCNPJPrestador') or get_tag_value(root, 'CNPJ')
-            if not row['Prestador_Razao']:
-                row['Prestador_Razao'] = get_tag_value(root, 'RazaoSocialPrestador')
-
-        # TOMADOR
-        toma_block = root.find(".//{* }toma") or root.find(".//toma") or root.find(".//{* }tom") or root.find(".//tom")
-        if toma_block is not None:
-            row['Tomador_CNPJ'] = get_tag_value(toma_block, 'CNPJ') or get_tag_value(toma_block, 'CPF')
-            row['Tomador_Razao'] = get_tag_value(toma_block, 'xNome')
-        else:
-            # Caso SP
-            row['Tomador_CNPJ'] = get_tag_value(root, 'CPFCNPJTomador') or get_tag_value(root, 'CNPJ')
-            row['Tomador_Razao'] = get_tag_value(root, 'RazaoSocialTomador')
-
-        # VALORES E IMPOSTOS
-        row['Vlr_Bruto'] = get_tag_value(root, 'vServ') or get_tag_value(root, 'ValorServicos') or "0"
-        row['ISS_Retido'] = get_tag_value(root, 'vISSRet') or get_tag_value(root, 'ValorISS') or "0"
-        row['Descricao'] = get_tag_value(root, 'xDescServ') or get_tag_value(root, 'Discriminacao') or ""
-        
         return row
     except:
         return None
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria Fiscal: Mapeamento Universal (Nacional & SP)")
+    st.subheader("Auditoria Fiscal: Mapeamento de Razão Social (Ajuste Final)")
 
     uploaded_files = st.file_uploader("Upload de XML ou ZIP", type=["xml", "zip"], accept_multiple_files=True)
 
     if uploaded_files:
         data_rows = []
         for uploaded_file in uploaded_files:
-            content = uploaded_file.read()
-            if uploaded_file.name.lower().endswith('.zip'):
-                with zipfile.ZipFile(io.BytesIO(content)) as z:
+            if uploaded_file.name.endswith('.zip'):
+                with zipfile.ZipFile(uploaded_file) as z:
                     for xml_name in z.namelist():
-                        if xml_name.lower().endswith('.xml'):
-                            res = process_xml_content(z.read(xml_name), xml_name)
+                        if xml_name.endswith('.xml'):
+                            res = process_xml_file(z.read(xml_name), xml_name)
                             if res: data_rows.append(res)
             else:
-                res = process_xml_content(content, uploaded_file.name)
+                res = process_xml_file(uploaded_file.read(), uploaded_file.name)
                 if res: data_rows.append(res)
 
         if data_rows:
             df = pd.DataFrame(data_rows)
             
-            # Limpeza de colunas numéricas
-            for col in ['Vlr_Bruto', 'ISS_Retido']:
+            # Conversão de valores financeiros para processamento correto
+            cols_fin = ['Vlr_Bruto', 'ISS_Retido']
+            for col in cols_fin:
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
 
-            st.success(f"Notas processadas: {len(df)}")
+            st.success(f"Notas processadas com sucesso: {len(df)}")
             st.dataframe(df)
 
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                df.to_excel(writer, index=False, sheet_name='Auditoria')
+                df.to_excel(writer, index=False, sheet_name='PortalServTax')
                 workbook = writer.book
-                worksheet = writer.sheets['Auditoria']
+                worksheet = writer.sheets['PortalServTax']
                 header_fmt = workbook.add_format({'bold': True, 'bg_color': '#FF69B4', 'font_color': 'white', 'border': 1})
+                
                 for i, col in enumerate(df.columns):
                     worksheet.write(0, i, col, header_fmt)
-                    worksheet.set_column(i, i, 20)
+                    worksheet.set_column(i, i, 22)
 
             st.download_button(
                 label="📥 Baixar Planilha de Auditoria",
@@ -126,7 +117,7 @@ def main():
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            st.error("Nenhum dado capturado. Verifique se os arquivos são XMLs de notas válidos.")
+            st.error("Erro: Nenhum dado capturado nos arquivos.")
 
 if __name__ == "__main__":
     main()
