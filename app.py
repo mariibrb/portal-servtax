@@ -21,18 +21,16 @@ st.markdown("""
 
 def get_xml_value(root, tags):
     """
-    Busca profunda: tenta encontrar o valor em qualquer uma das tags da lista,
-    ignorando namespaces e caminhos complexos.
+    Busca profunda em cascata: tenta cada tag da lista até encontrar o valor.
     """
     for tag in tags:
-        # Busca em qualquer nível do XML (.//) ignorando namespace ({*})
+        # Busca ignorando namespaces para compatibilidade universal
         element = root.find(f".//{{*}}{tag}")
         if element is None:
-            # Tenta busca simples sem namespace
             element = root.find(f".//{tag}")
         
         if element is not None and element.text:
-            return element.text
+            return element.text.strip()
     return ""
 
 def process_xml_file(content, filename):
@@ -40,11 +38,10 @@ def process_xml_file(content, filename):
         tree = ET.parse(io.BytesIO(content))
         root = tree.getroot()
         
-        # MAPEAMENTO MULTI-PREFEITURA (Dicionário de Possibilidades)
-        # Se entrar uma prefeitura nova, basta adicionar a tag técnica na lista correspondente.
+        # MAPEAMENTO DE POSSIBILIDADES (Ajuste Fino SP & Nacional)
         row = {
             'Arquivo': filename,
-            'Municipio': get_xml_value(root, ['xLocEmi', 'NomeCidade', 'Cidade']),
+            'Municipio': get_xml_value(root, ['xLocEmi', 'NomeCidade', 'Cidade', 'xMun']),
             
             # Número da Nota
             'Nota_Numero': get_xml_value(root, ['nNFSe', 'NumeroNFe', 'nNF', 'numero', 'Numero']),
@@ -52,15 +49,15 @@ def process_xml_file(content, filename):
             # Data de Emissão
             'Data_Emissao': get_xml_value(root, ['dhProc', 'dhEmi', 'DataEmissaoNFe', 'DataEmissao', 'dtEmi']),
             
-            # Prestador (Emitente)
-            'Prestador_CNPJ': get_xml_value(root, ['emit/CNPJ', 'emit_CNPJ', 'CPFCNPJPrestador/CNPJ', 'CNPJPrestador', 'CNPJ']),
-            'Prestador_Razao': get_xml_value(root, ['emit/xNome', 'emit_xNome', 'RazaoSocialPrestador', 'xNomePrestador', 'RazaoSocial']),
+            # PRESTADOR (Ajuste Fino: RazaoSocialPrestador para SP e xNome para Nacional)
+            'Prestador_CNPJ': get_xml_value(root, ['emit/CNPJ', 'CPFCNPJPrestador/CNPJ', 'CNPJPrestador', 'emit_CNPJ']),
+            'Prestador_Razao': get_xml_value(root, ['RazaoSocialPrestador', 'emit/xNome', 'xNomePrestador', 'emit_xNome', 'RazaoSocial']),
             
-            # Tomador (Destinatário)
-            'Tomador_CNPJ': get_value_nested(root, 'toma', 'CNPJ') or get_xml_value(root, ['CPFCNPJTomador/CNPJ', 'CPFCNPJTomador/CPF', 'dest/CNPJ', 'CNPJTomador']),
-            'Tomador_Razao': get_value_nested(root, 'toma', 'xNome') or get_xml_value(root, ['RazaoSocialTomador', 'dest/xNome', 'xNomeTomador', 'RazaoSocialTomador']),
+            # TOMADOR
+            'Tomador_CNPJ': get_xml_value(root, ['toma/CNPJ', 'CPFCNPJTomador/CNPJ', 'CPFCNPJTomador/CPF', 'dest/CNPJ', 'CNPJTomador']),
+            'Tomador_Razao': get_xml_value(root, ['toma/xNome', 'RazaoSocialTomador', 'dest/xNome', 'xNomeTomador', 'RazaoSocialTomador']),
             
-            # Valores
+            # Valores e Impostos
             'Vlr_Bruto': get_xml_value(root, ['vServ', 'ValorServicos', 'vNF', 'vServPrest/vServ', 'ValorTotal']),
             'ISS_Retido': get_xml_value(root, ['vISSRet', 'ValorISS', 'vISSQN', 'ValorISS_Retido', 'ISSRetido']),
             
@@ -75,18 +72,9 @@ def process_xml_file(content, filename):
     except:
         return None
 
-def get_value_nested(root, parent_tag, child_tag):
-    """Auxiliar para buscar tags dentro de blocos específicos como <toma><CNPJ>"""
-    parent = root.find(f".//{{*}}{parent_tag}")
-    if parent is not None:
-        child = parent.find(f".//{{*}}{child_tag}")
-        if child is not None and child.text:
-            return child.text
-    return None
-
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria Fiscal Multi-Prefeituras (Mapeamento Universal)")
+    st.subheader("Auditoria Fiscal Multi-Prefeituras (Versão Final Ajustada)")
 
     uploaded_files = st.file_uploader("Upload de XML ou ZIP", type=["xml", "zip"], accept_multiple_files=True)
 
@@ -106,7 +94,7 @@ def main():
         if data_rows:
             df = pd.DataFrame(data_rows)
             
-            # Conversão de valores financeiros
+            # Conversão de valores financeiros para cálculo e exibição correta
             cols_fin = ['Vlr_Bruto', 'ISS_Retido', 'PIS', 'COFINS']
             for col in cols_fin:
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
@@ -126,7 +114,7 @@ def main():
                     worksheet.set_column(i, i, 22)
 
             st.download_button(
-                label="📥 Baixar Planilha de Auditoria Unificada",
+                label="📥 Baixar Planilha de Auditoria Final",
                 data=output.getvalue(),
                 file_name="portal_servtax_auditoria.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
