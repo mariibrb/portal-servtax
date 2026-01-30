@@ -7,7 +7,7 @@ import zipfile
 # Configuração da Página
 st.set_page_config(page_title="Portal ServTax", layout="wide", page_icon="📑")
 
-# Estilo Rihanna
+# Estilo Rihanna (Rosa e Branco)
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&family=Plus+Jakarta+Sans:wght@400;700&display=swap');
@@ -16,6 +16,7 @@ st.markdown("""
     .stButton>button { background-color: #FF69B4; color: white; border-radius: 10px; border: none; font-weight: bold; width: 100%; height: 3em; }
     .stButton>button:hover { background-color: #FFDEEF; color: #FF69B4; border: 1px solid #FF69B4; }
     [data-testid="stFileUploadDropzone"] { border: 2px dashed #FF69B4; background-color: #FFDEEF; }
+    .summary-card { background-color: #FFDEEF; padding: 20px; border-radius: 15px; border-left: 5px solid #FF69B4; margin-bottom: 20px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -39,13 +40,14 @@ def flatten_dict(d, parent_key='', sep='_'):
 
 def simplify_and_filter(df):
     """
-    Aplica equivalência direta baseada nas tags identificadas nos XMLs.
+    Motor de Auditoria: Mapeamento por Tags Estruturais (SP e Nacional) 
+    e agregação de valores (SOMASES Logic).
     """
     final_df_data = {}
     if 'Arquivo_Origem' in df.columns:
         final_df_data['Arquivo'] = df['Arquivo_Origem']
 
-    # MAPEAMENTO TÉCNICO POR TAG (Equivalências SP vs Nacional)
+    # MAPEAMENTO TÉCNICO POR TAGS (SP vs Nacional/DPS)
     mapping = {
         'Nota_Numero': ['nNFSe', 'NumeroNFe', 'nNF'],
         'Data_Emissao': ['dhProc', 'DataEmissaoNFe', 'dhEmi', 'DataEmissao'],
@@ -54,12 +56,12 @@ def simplify_and_filter(df):
         'Prestador_CNPJ': ['emit_CNPJ', 'CPFCNPJPrestador_CNPJ', 'CNPJPrestador'],
         'Prestador_Razao': ['emit_xNome', 'RazaoSocialPrestador', 'xNomePrestador'],
         
-        # TOMADOR (Campos críticos corrigidos)
+        # TOMADOR
         'Tomador_CNPJ': ['toma_CNPJ', 'CPFCNPJTomador_CNPJ', 'CPFCNPJTomador_CPF', 'dest_CNPJ'],
         'Tomador_Razao': ['toma_xNome', 'RazaoSocialTomador', 'dest_xNome', 'xNomeTomador'],
         
         # VALORES E IMPOSTOS
-        'Vlr_Bruto': ['vServ', 'ValorServicos', 'vNF', 'v_serv'],
+        'Vlr_Bruto': ['vServ', 'ValorServicos', 'vNF', 'vServPrest_vServ'],
         'ISS_Valor': ['vISSRet', 'ValorISS', 'vISSQN', 'ValorISS_Retido'],
         'PIS_Retido': ['vPIS', 'ValorPIS', 'pis_retido'],
         'COFINS_Retido': ['vCOFINS', 'ValorCOFINS', 'cofins_retido'],
@@ -73,9 +75,8 @@ def simplify_and_filter(df):
     for friendly_name, tags in mapping.items():
         found_series = None
         for col in df.columns:
-            # Verifica se a coluna termina exatamente com a tag mapeada
             if any(col.endswith(tag) for tag in tags):
-                # Filtro para garantir que Prestador não pegue dados do Tomador
+                # Filtro de Contexto Fiscal
                 if 'Prestador' in friendly_name and ('Tomador' in col or 'toma' in col or 'dest' in col): continue
                 if 'Tomador' in friendly_name and ('Prestador' in col or 'emit' in col): continue
                 
@@ -87,9 +88,9 @@ def simplify_and_filter(df):
             if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL']):
                 final_df_data[friendly_name] = pd.to_numeric(found_series, errors='coerce').fillna(0.0)
             else:
-                final_df_data[friendly_name] = found_series.fillna("Não Identificado")
+                final_df_data[friendly_name] = found_series.fillna("Não Localizado")
         else:
-            final_df_data[friendly_name] = 0.0 if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL']) else "Não Identificado"
+            final_df_data[friendly_name] = 0.0 if any(x in friendly_name for x in ['Vlr', 'ISS', 'PIS', 'COFINS', 'IR', 'CSLL']) else "Não Localizado"
 
     return pd.DataFrame(final_df_data)
 
@@ -106,16 +107,16 @@ def extract_xml_from_zip(zip_data, extracted_list):
     except: pass
 
 def process_files(uploaded_files):
-    all_data = []
+    all_extracted_data = []
     for uploaded_file in uploaded_files:
         content = uploaded_file.read()
         if uploaded_file.name.lower().endswith('.xml'):
-            all_data.append({'name': uploaded_file.name, 'content': content})
+            all_extracted_data.append({'name': uploaded_file.name, 'content': content})
         elif uploaded_file.name.lower().endswith('.zip'):
-            extract_xml_from_zip(content, all_data)
+            extract_xml_from_zip(content, all_extracted_data)
             
     final_rows = []
-    for item in all_data:
+    for item in all_extracted_data:
         try:
             data_dict = xmltodict.parse(item['content'])
             if isinstance(data_dict, list):
@@ -132,38 +133,72 @@ def process_files(uploaded_files):
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria Fiscal: Mapeamento Direto por Tags")
+    st.subheader("Auditoria Fiscal: Visão Excel (SOMASES / Tabela Dinâmica)")
 
     uploaded_files = st.file_uploader("Upload de XML ou ZIP", type=["xml", "zip"], accept_multiple_files=True)
 
     if uploaded_files:
-        with st.spinner('A processar tags estruturadas...'):
+        with st.spinner('Consolidando Auditoria...'):
             df_raw = process_files(uploaded_files)
         
         if not df_raw.empty:
             df_final = simplify_and_filter(df_raw)
 
-            st.success(f"Notas processadas: {len(df_final)}")
+            # --- SEÇÃO RESUMO DE AUDITORIA (LÓGICA SOMASES) ---
+            st.markdown("### 📊 Resumo de Auditoria (Agregação por Tomador)")
+            
+            # Agregando dados como uma Pivot Table / SOMASES
+            df_summary = df_final.groupby(['Tomador_Razao', 'Tomador_CNPJ']).agg(
+                Qtd_Notas=('Nota_Numero', 'count'),
+                Total_Vlr_Bruto=('Vlr_Bruto', 'sum'),
+                Total_ISS=('ISS_Valor', 'sum')
+            ).reset_index()
+
+            # Estilizando o resumo para parecer Excel de Auditoria
+            st.dataframe(df_summary.style.format({
+                'Total_Vlr_Bruto': 'R$ {:,.2f}',
+                'Total_ISS': 'R$ {:,.2f}'
+            }), use_container_width=True)
+
+            # Cards de Totais Gerais
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.markdown(f'<div class="summary-card"><b>Total Notas</b><br><h2>{len(df_final)}</h2></div>', unsafe_allow_width=True, unsafe_allow_html=True)
+            with col2:
+                st.markdown(f'<div class="summary-card"><b>Vlr Bruto Total</b><br><h2>R$ {df_final["Vlr_Bruto"].sum():,.2f}</h2></div>', unsafe_allow_width=True, unsafe_allow_html=True)
+            with col3:
+                st.markdown(f'<div class="summary-card"><b>ISS Retido Total</b><br><h2>R$ {df_final["ISS_Valor"].sum():,.2f}</h2></div>', unsafe_allow_width=True, unsafe_allow_html=True)
+
+            # --- LISTAGEM DETALHADA ---
+            st.markdown("### 📄 Listagem Detalhada de Itens")
             st.dataframe(df_final)
 
+            # Exportação Excel com Múltiplas Abas (Dados + Resumo)
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                df_final.to_excel(writer, index=False, sheet_name='PortalServTax')
+                # Aba Detalhada
+                df_final.to_excel(writer, index=False, sheet_name='Detalhado')
+                # Aba Resumo (SOMASES)
+                df_summary.to_excel(writer, index=False, sheet_name='Resumo_Auditoria')
+                
                 workbook = writer.book
-                worksheet = writer.sheets['PortalServTax']
                 header_fmt = workbook.add_format({'bold': True, 'bg_color': '#FF69B4', 'font_color': 'white', 'border': 1})
-                for i, col in enumerate(df_final.columns):
-                    worksheet.write(0, i, col, header_fmt)
-                    worksheet.set_column(i, i, 25)
+                
+                for sheet in ['Detalhado', 'Resumo_Auditoria']:
+                    worksheet = writer.sheets[sheet]
+                    df_to_col = df_final if sheet == 'Detalhado' else df_summary
+                    for i, col in enumerate(df_to_col.columns):
+                        worksheet.write(0, i, col, header_fmt)
+                        worksheet.set_column(i, i, 20)
 
             st.download_button(
-                label="📥 Baixar Excel de Auditoria",
+                label="📥 Baixar Excel de Auditoria (Com Resumo Dinâmico)",
                 data=output.getvalue(),
-                file_name="portal_servtax_auditoria.xlsx",
+                file_name="auditoria_servtax_excel_pivot.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            st.warning("Nenhum dado encontrado.")
+            st.warning("Nenhum dado encontrado nos arquivos.")
 
 if __name__ == "__main__":
     main()
