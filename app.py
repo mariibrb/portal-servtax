@@ -39,13 +39,13 @@ def flatten_dict(d, parent_key='', sep='_'):
 
 def simplify_and_filter(df):
     """
-    Motor de Equivalência de Alta Precisão: Mapeia caminhos exatos dos arquivos enviados.
+    Motor de Equivalência de Alta Precisão: Mapeia caminhos exatos dos arquivos SP e Nacional.
     """
     final_df_data = {}
     if 'Arquivo_Origem' in df.columns:
         final_df_data['Arquivo'] = df['Arquivo_Origem']
 
-    # MAPEAMENTO BASEADO NOS XMLS: 430510... (Nacional) e J9DL... (SP)
+    # MAPEAMENTO BASEADO NOS SEUS XMLS: 430510... (Nacional) e J9DL... (SP)
     mapping = {
         'Nota_Numero': ['nNFSe', 'NumeroNFe', 'nNF', 'numero'],
         'Data_Emissao': ['dhProc', 'DataEmissaoNFe', 'dhEmi', 'DataEmissao'],
@@ -54,8 +54,8 @@ def simplify_and_filter(df):
         'Prestador_CNPJ': ['emit_CNPJ', 'CPFCNPJPrestador_CNPJ', 'CNPJPrestador', 'prestador_cnpj'],
         'Prestador_Razao': ['emit_xNome', 'RazaoSocialPrestador', 'prestador_razao', 'xNomePrestador'],
         
-        # TOMADOR - Equivalências Diretas
-        'Tomador_CNPJ': ['toma_CNPJ', 'CPFCNPJTomador_CNPJ', 'CPFCNPJTomador_CPF', 'toma_CPF', 'CNPJTomador'],
+        # TOMADOR - O AJUSTE CRÍTICO AQUI
+        'Tomador_CNPJ': ['toma_CNPJ', 'CPFCNPJTomador_CNPJ', 'CPFCNPJTomador_CPF', 'toma_CPF', 'CNPJTomador', 'CPFCNPJTomador_CpfCnpj_CNPJ'],
         'Tomador_Razao': ['toma_xNome', 'RazaoSocialTomador', 'dest_xNome', 'tomador_razao', 'xNomeTomador'],
         
         # VALORES
@@ -74,21 +74,20 @@ def simplify_and_filter(df):
 
     for friendly_name, radicals in mapping.items():
         found_series = None
-        # Normaliza radicais para minúsculo
         radicals_low = [r.lower() for r in radicals]
         
         for col in df.columns:
             col_low = col.lower()
-            # Verifica se o final da coluna bate com algum radical (ignora case)
+            # Verifica se o final da coluna bate com o radical
             if any(col_low.endswith(rad) for rad in radicals_low):
                 
-                # Filtro de Contexto (Evita misturar Prestador/Tomador)
+                # Filtro de Contexto Rígido
                 if 'prestador' in friendly_name.lower() and ('tomador' in col_low or 'toma' in col_low or 'dest' in col_low): 
                     continue
                 if 'tomador' in friendly_name.lower() and ('prestador' in col_low or 'emit' in col_low): 
                     continue
                 
-                # Captura a primeira coluna que contenha dados válidos
+                # Captura dados válidos
                 current_col = df[col]
                 if found_series is None or (isinstance(found_series, pd.Series) and found_series.isnull().all()):
                     found_series = current_col
@@ -127,17 +126,17 @@ def process_files(uploaded_files):
     final_rows = []
     for item in all_data:
         try:
-            # xmltodict converte o XML em dicionário respeitando a hierarquia
             data_dict = xmltodict.parse(item['content'])
-            
-            # Se o XML tiver múltiplos registros (listas), processa cada um
+            # Processa se for lista de notas ou nota única
             if isinstance(data_dict, list):
                 for sub in data_dict:
                     flat = flatten_dict(sub)
                     flat['Arquivo_Origem'] = item['name']
                     final_rows.append(flat)
             else:
-                flat = flatten_dict(data_dict)
+                # Trata casos onde o root é diferente (NFe vs Retorno)
+                root_key = list(data_dict.keys())[0]
+                flat = flatten_dict(data_dict[root_key])
                 flat['Arquivo_Origem'] = item['name']
                 final_rows.append(flat)
         except: continue
