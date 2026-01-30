@@ -22,7 +22,6 @@ st.markdown("""
 def get_xml_value(root, tags):
     """
     Busca em Cascata com XPath: tenta cada tag da lista em qualquer nível do XML.
-    Ignora namespaces para garantir leitura universal.
     """
     for tag in tags:
         element = root.find(f".//{{*}}{tag}")
@@ -31,14 +30,14 @@ def get_xml_value(root, tags):
         
         if element is not None and element.text:
             return element.text.strip()
-    return "0.00" if any(x in tag.lower() for x in ['vlr', 'valor', 'iss', 'pis', 'cofins', 'ir', 'csll', 'liquido', 'trib']) else ""
+    return "0.00" if any(x in tag.lower() for x in ['vlr', 'valor', 'iss', 'pis', 'cofins', 'ir', 'csll', 'liquido']) else ""
 
 def process_xml_file(content, filename):
     try:
         tree = ET.parse(io.BytesIO(content))
         root = tree.getroot()
         
-        # MAPEAMENTO DE POSSIBILIDADES (ISS Próprio e Retido Totalmente Separados)
+        # MAPEAMENTO DE POSSIBILIDADES (Blindagem de ISS Retido)
         row = {
             'Arquivo': filename,
             'Nota_Numero': get_xml_value(root, ['nNFSe', 'NumeroNFe', 'nNF', 'numero', 'Numero']),
@@ -56,11 +55,11 @@ def process_xml_file(content, filename):
             'Vlr_Bruto': get_xml_value(root, ['vServ', 'ValorServicos', 'vNF', 'vServPrest/vServ', 'ValorTotal']),
             'Vlr_Liquido': get_xml_value(root, ['vLiq', 'ValorLiquidoNFe', 'vLiqNFSe', 'vLiquido', 'vServPrest/vLiq']),
             
-            # ISS PRÓPRIO (Apenas tags de imposto devido/apurado)
+            # ISS PRÓPRIO (Focado em tags de débito do prestador)
             'ISS_Valor': get_xml_value(root, ['vISS', 'ValorISS', 'vISSQN', 'iss/vISS']),
             
-            # ISS RETIDO (Apenas tags de retenção na fonte)
-            'Ret_ISS': get_xml_value(root, ['vISSRet', 'vTotTribMun', 'ValorISS_Retido', 'ISSRetido', 'vISSRetido', 'vRetISS', 'iss/vRet']),
+            # ISS RETIDO (Blindado para não pegar vISS do prestador)
+            'Ret_ISS': get_xml_value(root, ['vTotTribMun', 'vISSRet', 'ValorISS_Retido', 'ISSRetido', 'vISSRetido', 'vRetISS', 'iss/vRet']),
             
             # DEMAIS RETENÇÕES (Leitura Direta)
             'Ret_PIS': get_xml_value(root, ['vPIS', 'ValorPIS', 'vPIS_Ret', 'PISRetido']),
@@ -77,7 +76,7 @@ def process_xml_file(content, filename):
 
 def main():
     st.title("📑 Portal ServTax")
-    st.subheader("Auditoria Fiscal: Separação Rigorosa de ISS Próprio e Retido")
+    st.subheader("Auditoria Fiscal: Blindagem de ISS Próprio vs Retido")
 
     uploaded_files = st.file_uploader("Upload de XML ou ZIP", type=["xml", "zip"], accept_multiple_files=True)
 
