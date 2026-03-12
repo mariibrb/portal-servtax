@@ -89,7 +89,7 @@ def get_xml_value(root, tags):
             element = root.find(f".//{tag}")
         if element is not None and element.text:
             return element.text.strip()
-    return "0.00" if any(x in str(tags).lower() for x in ['vlr', 'valor', 'iss', 'pis', 'cofins', 'ir', 'csll', 'liquido', 'trib', 'dedu', 'dr']) else ""
+    return "0.00" if any(x in str(tags).lower() for x in ['vlr', 'valor', 'iss', 'pis', 'cofins', 'ir', 'csll', 'liquido', 'trib']) else ""
 
 def process_xml_file(content, filename):
     try:
@@ -97,6 +97,8 @@ def process_xml_file(content, filename):
         root = tree.getroot()
         iss_retido_flag = get_xml_value(root, ['ISSRetido']).lower()
         tp_ret_flag = get_xml_value(root, ['tpRetISSQN'])
+        
+        # AJUSTE FINO: Lendo a flag de instrução federal (1=Retido, 2=Prestador paga)
         tp_ret_fed = get_xml_value(root, ['tpRetPisCofins'])
         
         row = {
@@ -111,8 +113,11 @@ def process_xml_file(content, filename):
             'Vlr_Liquido': get_xml_value(root, ['vLiq', 'ValorLiquidoNFe', 'vLiqNFSe', 'vLiquido', 'vServPrest/vLiq']),
             'ISS_Valor': get_xml_value(root, ['vISS', 'ValorISS', 'vISSQN', 'iss/vISS']),
             'Vlr_Deducao': get_xml_value(root, ['vDR', 'vDedRed', 'vDeducoes', 'ValorDeducoes']),
+            
+            # AJUSTE CIRÚRGICO: Só captura valor se o XML confirmar que é retenção (tpRetPisCofins == 1)
             'Ret_PIS': get_xml_value(root, ['vPIS', 'vPis', 'ValorPIS', 'vPIS_Ret', 'PISRetido', 'vRetPIS']) if tp_ret_fed == '1' else "0.00",
             'Ret_COFINS': get_xml_value(root, ['vCOFINS', 'vCofins', 'ValorCOFINS', 'vCOFINS_Ret', 'COFINSRetido', 'vRetCOFINS']) if tp_ret_fed == '1' else "0.00",
+            
             'Ret_CSLL': get_xml_value(root, ['vCSLL', 'ValorCSLL', 'vCSLL_Ret', 'CSLLRetido', 'vRetCSLL', 'vRetCSLL']),
             'Ret_IRRF': get_xml_value(root, ['vRetIRRF', 'vIR', 'ValorIR', 'vIR_Ret', 'IRRetido', 'vRetIR', 'vIRRF', 'vRetIRRF']),
             'Descricao': get_xml_value(root, ['CodigoServico', 'itemServico', 'cServ', 'xDescServ', 'Discriminacao', 'xServ', 'infCpl', 'xProd'])
@@ -141,9 +146,9 @@ st.markdown("---")
 
 uploaded_files = st.file_uploader("Arraste os arquivos XML ou ZIP aqui", type=["xml", "zip"], accept_multiple_files=True)
 
-# LÓGICA DE PERSISTÊNCIA
-if 'df_final' not in st.session_state:
-    st.session_state.df_final = None
+# LÓGICA DE PERSISTÊNCIA (SESSION STATE)
+if 'df_memo' not in st.session_state:
+    st.session_state.df_memo = None
 
 if uploaded_files:
     if st.button("🚀 INICIAR AUDITORIA FISCAL"):
@@ -166,37 +171,38 @@ if uploaded_files:
                 for col in cols_fin:
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
 
+                # --- DIAGNÓSTICO ---
                 def definir_diagnostico(r):
                     diff = round(r['Vlr_Bruto'] - r['Vlr_Liquido'], 2)
-                    soma_abatimentos = round(r['Ret_ISS'] + r['Ret_PIS'] + r['Ret_COFINS'] + r['Ret_CSLL'] + r['Ret_IRRF'] + r['Vlr_Deducao'], 2)
-                    return "✅" if abs(diff - soma_abatimentos) <= 0.01 else f"⚠️ Divergência: R$ {round(diff - soma_abatimentos, 2)}"
+                    soma_retencoes = round(r['Ret_ISS'] + r['Ret_PIS'] + r['Ret_COFINS'] + r['Ret_CSLL'] + r['Ret_IRRF'] + r['Vlr_Deducao'], 2)
+                    return "✅" if abs(diff - soma_retencoes) <= 0.01 else f"⚠️ Divergência: R$ {round(diff - soma_retencoes, 2)}"
 
                 df['Diagnostico'] = df.apply(definir_diagnostico, axis=1)
-                
-                # Reordenar ISS
+
+                # Reordenar ISS para ficar perto do valor
                 cols = list(df.columns)
                 if 'Ret_ISS' in cols and 'ISS_Valor' in cols:
                     cols.insert(cols.index('ISS_Valor') + 1, cols.pop(cols.index('Ret_ISS')))
                     df = df[cols]
-                
-                st.session_state.df_final = df
 
-if st.session_state.df_final is not None:
-    df = st.session_state.df_final
+                st.session_state.df_memo = df
+
+if st.session_state.df_memo is not None:
+    df = st.session_state.df_memo
     st.success(f"✅ {len(df)} notas processadas!")
     st.dataframe(df)
 
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         start_row = 15 # Respiro visual
-        df.to_excel(writer, index=False, sheet_name='Auditoria', startrow=start_row)
+        df.to_excel(writer, index=False, sheet_name='PortalServTax', startrow=start_row)
         
         workbook = writer.book
-        worksheet = writer.sheets['Auditoria']
+        worksheet = writer.sheets['PortalServTax']
         
         # Formatos
         header_fmt = workbook.add_format({'bold': True, 'bg_color': '#FF69B4', 'font_color': 'white', 'border': 1, 'align': 'center'})
-        subtotal_fmt = workbook.add_format({'bold': True, 'bg_color': '#F8F9FA', 'border': 1, 'num_format': '#,##0.00'})
+        subtotal_fmt = workbook.add_format({'bold': True, 'bg_color': '#F8F9FA', 'font_color': '#333333', 'border': 1, 'num_format': '#,##0.00'})
         num_fmt = workbook.add_format({'num_format': '#,##0.00'})
         
         cols_fin_indices = ['Vlr_Bruto', 'Vlr_Liquido', 'Vlr_Deducao', 'ISS_Valor', 'Ret_ISS', 'Ret_PIS', 'Ret_COFINS', 'Ret_CSLL', 'Ret_IRRF']
@@ -217,7 +223,7 @@ if st.session_state.df_final is not None:
             else:
                 worksheet.set_column(i, i, 22)
 
-        # Adicionar Tabela Oficial para Filtros de Linha
+        # Adicionar Filtros e Formatar como Tabela Oficial do Excel
         worksheet.add_table(start_row, 0, start_row + len(df), len(df.columns) - 1, {
             'columns': [{'header': c} for c in df.columns],
             'style': 'TableStyleMedium 1'
@@ -226,6 +232,6 @@ if st.session_state.df_final is not None:
     st.download_button(
         label="📥 BAIXAR EXCEL AJUSTADO",
         data=output.getvalue(),
-        file_name="portal_tax_auditoria.xlsx",
+        file_name="portal_servtax_auditoria.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
