@@ -111,10 +111,8 @@ def process_xml_file(content, filename):
             'Vlr_Liquido': get_xml_value(root, ['vLiq', 'ValorLiquidoNFe', 'vLiqNFSe', 'vLiquido', 'vServPrest/vLiq']),
             'ISS_Valor': get_xml_value(root, ['vISS', 'ValorISS', 'vISSQN', 'iss/vISS']),
             'Vlr_Deducao': get_xml_value(root, ['vDR', 'vDedRed', 'vDeducoes', 'ValorDeducoes']),
-            
             'Ret_PIS': get_xml_value(root, ['vPIS', 'vPis', 'ValorPIS', 'vPIS_Ret', 'PISRetido', 'vRetPIS']) if tp_ret_fed == '1' else "0.00",
             'Ret_COFINS': get_xml_value(root, ['vCOFINS', 'vCofins', 'ValorCOFINS', 'vCOFINS_Ret', 'COFINSRetido', 'vRetCOFINS']) if tp_ret_fed == '1' else "0.00",
-            
             'Ret_CSLL': get_xml_value(root, ['vCSLL', 'ValorCSLL', 'vCSLL_Ret', 'CSLLRetido', 'vRetCSLL', 'vRetCSLL']),
             'Ret_IRRF': get_xml_value(root, ['vRetIRRF', 'vIR', 'ValorIR', 'vIR_Ret', 'IRRetido', 'vRetIR', 'vIRRF', 'vRetIRRF']),
             'Descricao': get_xml_value(root, ['CodigoServico', 'itemServico', 'cServ', 'xDescServ', 'Discriminacao', 'xServ', 'infCpl', 'xProd'])
@@ -190,7 +188,7 @@ if st.session_state.df_final is not None:
 
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        start_row = 15 # Respiro visual (Tabela começa na 16)
+        start_row = 15 # Respiro visual
         df.to_excel(writer, index=False, sheet_name='Auditoria', startrow=start_row)
         
         workbook = writer.book
@@ -207,10 +205,9 @@ if st.session_state.df_final is not None:
             # Títulos na Linha 16
             worksheet.write(start_row, i, col, header_fmt)
             
-            # Subtotal na Linha 1 (Fórmula ajustada para o intervalo da tabela)
+            # Subtotal na Linha 1
             if col in cols_fin_indices:
                 col_letter = chr(65 + i) if i < 26 else f"{chr(64 + i//26)}{chr(65 + i%26)}"
-                # Fórmula SUBTOTAL(9,...) soma apenas o que está visível no filtro
                 formula = f"=SUBTOTAL(9,{col_letter}{start_row+2}:{col_letter}{start_row + len(df) + 1})"
                 worksheet.write(0, i, formula, subtotal_fmt)
                 worksheet.write(1, i, f"Total {col}", workbook.add_format({'italic': True, 'font_size': 8}))
@@ -220,7 +217,7 @@ if st.session_state.df_final is not None:
             else:
                 worksheet.set_column(i, i, 22)
 
-        # Adicionar Tabela Oficial para habilitar Filtros de Linha automáticos
+        # Adicionar Tabela Oficial para Filtros de Linha
         worksheet.add_table(start_row, 0, start_row + len(df), len(df.columns) - 1, {
             'columns': [{'header': c} for c in df.columns],
             'style': 'TableStyleMedium 1'
