@@ -84,25 +84,23 @@ aplicar_estilo_sentinela_zonas()
 # --- LÓGICA DE PROCESSAMENTO ---
 def get_xml_value(root, tags):
     for tag in tags:
-        # Busca profunda em qualquer nível do XML para capturar tags em blocos variados
+        # BUSCA RECURSIVA PROFUNDA MANTIDA
         element = root.find(f".//{{*}}{tag}")
         if element is None:
             element = root.find(f".//{tag}")
         if element is not None and element.text:
             return element.text.strip()
-    return "0.00" if any(x in str(tags).lower() for x in ['vlr', 'valor', 'iss', 'pis', 'cofins', 'ir', 'csll', 'liquido', 'trib', 'bc', 'ded', 'dr', 'vserv']) else ""
+    # Mantenho a regra de retorno de 0.00 para campos financeiros
+    return "0.00" if any(x in str(tags).lower() for x in ['vlr', 'valor', 'iss', 'pis', 'cofins', 'ir', 'csll', 'liquido', 'trib', 'bc', 'ded', 'dr', 'serv', 'liq']) else ""
 
 def process_xml_file(content, filename):
     try:
         tree = ET.parse(io.BytesIO(content))
         root = tree.getroot()
-        
-        # Tags de controle para ISS e Retenções Federais
         iss_retido_flag = get_xml_value(root, ['ISSRetido']).lower()
         tp_ret_flag = get_xml_value(root, ['tpRetISSQN', 'tpRetISS'])
-        tp_ret_piscofins = get_xml_value(root, ['tpRetPisCofins'])
         
-        # Restauração integral com acréscimo de tags para SPED Nacional (vLiq, vBC, vISSQN, vDedRed, vDR)
+        # RESTAURAÇÃO INTEGRAL DE TODAS AS COLUNAS COM ACRÉSCIMO DE TAGS
         row = {
             'Arquivo': filename,
             'Nota_Numero': get_xml_value(root, ['nNFSe', 'NumeroNFe', 'nNF', 'numero', 'Numero', 'nDPS']),
@@ -112,22 +110,22 @@ def process_xml_file(content, filename):
             'Tomador_CNPJ': get_xml_value(root, ['toma/CNPJ', 'CPFCNPJTomador/CNPJ', 'CPFCNPJTomador/CPF', 'dest/CNPJ', 'CNPJTomador', 'toma/CPF', 'tom/CNPJ', 'CNPJ']),
             'Tomador_Razao': get_xml_value(root, ['toma/xNome', 'RazaoSocialTomador', 'dest/xNome', 'xNomeTomador', 'RazaoSocialTomador', 'tom/xNome', 'xNome']),
             
-            # VALORES BASE + ACRÉSCIMO DE DEDUÇÃO E BC
-            'Vlr_Bruto': get_xml_value(root, ['vServ', 'vServPrest/vServ', 'ValorServicos', 'vNF', 'ValorTotal']),
+            # VALORES BASE (RESTAURADOS)
+            'Vlr_Bruto': get_xml_value(root, ['vServ', 'ValorServicos', 'vNF', 'vServPrest/vServ', 'ValorTotal', 'vServPrest']),
             'Vlr_Deducao': get_xml_value(root, ['vDedRed', 'vDR', 'vDeducao', 'ValorDeducao']),
             'BC_PIS_COFINS': get_xml_value(root, ['vBCPisCofins', 'vBCPISCOFINS', 'vBCPIS', 'vBCCOFINS', 'vBC']),
             'Vlr_Liquido': get_xml_value(root, ['vLiq', 'ValorLiquidoNFe', 'vLiqNFSe', 'vLiquido', 'vServPrest/vLiq']),
             
-            # IMPOSTOS
-            'ISS_Valor': get_xml_value(root, ['vISSQN', 'vISS', 'ValorISS', 'iss/vISS']),
-            'Ret_PIS': get_xml_value(root, ['vPis', 'vPIS', 'ValorPIS', 'vPIS_Ret', 'PISRetido', 'vRetPIS']),
-            'Ret_COFINS': get_xml_value(root, ['vCofins', 'vCOFINS', 'ValorCOFINS', 'vCOFINS_Ret', 'COFINSRetido', 'vRetCOFINS']),
-            'Ret_CSLL': get_xml_value(root, ['vRetCSLL', 'vCSLL', 'ValorCSLL', 'vCSLL_Ret', 'CSLLRetido', 'vRetCSLL']),
-            'Ret_IRRF': get_xml_value(root, ['vRetIRRF', 'vIR', 'ValorIR', 'vIR_Ret', 'IRRetido', 'vRetIR', 'vIRRF']),
+            # IMPOSTOS (RESTAURADOS)
+            'ISS_Valor': get_xml_value(root, ['vISS', 'ValorISS', 'vISSQN', 'iss/vISS']),
+            'Ret_PIS': get_xml_value(root, ['vPIS', 'ValorPIS', 'vPIS_Ret', 'PISRetido', 'vRetPIS', 'vPis']),
+            'Ret_COFINS': get_xml_value(root, ['vCOFINS', 'ValorCOFINS', 'vCOFINS_Ret', 'COFINSRetido', 'vRetCOFINS', 'vCofins']),
+            'Ret_CSLL': get_xml_value(root, ['vCSLL', 'ValorCSLL', 'vCSLL_Ret', 'CSLLRetido', 'vRetCSLL']),
+            'Ret_IRRF': get_xml_value(root, ['vIR', 'ValorIR', 'vIR_Ret', 'IRRetido', 'vRetIR', 'vIRRF', 'vRetIRRF']),
             'Descricao': get_xml_value(root, ['CodigoServico', 'itemServico', 'cServ', 'xDescServ', 'Discriminacao', 'xServ', 'infCpl', 'xProd'])
         }
 
-        # Lógica de Ret_ISS mantendo a inteligência original
+        # Lógica de ISS Retido original de ontem
         v_total_ret_tag = float(get_xml_value(root, ['vTotalRet']))
         if tp_ret_flag == '2' or iss_retido_flag == 'true' or v_total_ret_tag > 0:
              row['Ret_ISS'] = row['ISS_Valor']
@@ -152,7 +150,7 @@ with col1:
         <ol>
             <li><b>Upload:</b> Arraste arquivos <b>.XML</b> ou <b>.ZIP</b> abaixo.</li>
             <li><b>Ação:</b> Clique em <b>"INICIAR AUDITORIA"</b>.</li>
-            <li><b>Conferência:</b> Analise o <b>Diagnóstico</b> detalhado.</li>
+            <li><b>Conferência:</b> Analise o <b>Diagnóstico</b> de divergências.</li>
             <li><b>Saída:</b> Baixe o Excel final para auditoria.</li>
         </ol>
     </div>
@@ -163,10 +161,10 @@ with col2:
     <div class="instrucoes-card">
         <h3>📊 O que será obtido?</h3>
         <ul>
-            <li><b>Leitura Universal:</b> Agora suportando SPED Nacional (Tags vISSQN, vLiq).</li>
+            <li><b>Leitura Universal:</b> Dados de centenas de prefeituras consolidados.</li>
             <li><b>Gestão de ISS:</b> Separação entre ISS Próprio e Retido.</li>
             <li><b>Impostos Federais:</b> Captura de PIS, COFINS, CSLL e IRRF.</li>
-            <li><b>Diagnóstico:</b> Validação automática Bruto vs Líquido + Retenções.</li>
+            <li><b>Diagnóstico:</b> Identificação de notas com retenções pendentes.</li>
         </ul>
     </div>
     """, unsafe_allow_html=True)
@@ -192,90 +190,67 @@ if uploaded_files:
 
             if data_rows:
                 df = pd.DataFrame(data_rows)
-                
-                # Conversão numérica de todas as colunas financeiras
+                # Todas as colunas financeiras originais de volta
                 cols_fin = ['Vlr_Bruto', 'Vlr_Deducao', 'BC_PIS_COFINS', 'Vlr_Liquido', 'ISS_Valor', 'Ret_ISS', 'Ret_PIS', 'Ret_COFINS', 'Ret_CSLL', 'Ret_IRRF']
                 for col in cols_fin:
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
 
-                # --- LÓGICA DE DIAGNÓSTICO MULTICENÁRIO ---
+                # DIAGNÓSTICO MULTICENÁRIO PARA NÃO DAR ERRO NAS NOTAS CERTAS
                 def realizar_diagnostico(r):
-                    v_bruto = round(r['Vlr_Bruto'], 2)
-                    v_liq = round(r['Vlr_Liquido'], 2)
-                    v_ded = round(r['Vlr_Deducao'], 2)
-                    
-                    # Soma das retenções identificadas (ISS + Federais)
                     soma_ret = round(r['Ret_ISS'] + r['Ret_PIS'] + r['Ret_COFINS'] + r['Ret_CSLL'] + r['Ret_IRRF'], 2)
+                    diff = round(r['Vlr_Bruto'] - r['Vlr_Liquido'], 2)
+                    v_ded = round(r['Vlr_Deducao'], 2)
+
+                    if abs(diff - soma_ret) <= 0.05: return "✅"
+                    if abs(diff - (soma_ret + v_ded)) <= 0.05: return "✅"
+                    if abs(diff - v_ded) <= 0.05: return "✅"
                     
-                    diff_observada = round(v_bruto - v_liq, 2)
-
-                    # Caso 1: Bruto - Retenções = Líquido (Nota Comum)
-                    if abs(diff_observada - soma_ret) <= 0.05:
-                        return "✅ Ok"
-                    # Caso 2: Bruto - Dedução - Retenções = Líquido (Nota Obra)
-                    if abs(diff_observada - (soma_ret + v_ded)) <= 0.05:
-                        return "✅ Ok (Obra)"
-                    # Caso 3: Apenas Dedução (Sem retenções)
-                    if abs(diff_observada - v_ded) <= 0.05:
-                        return "✅ Ok (Dedução)"
-
-                    gap = round(diff_observada - (soma_ret + v_ded), 2)
-                    return f"❌ Erro: Discrepância de R$ {gap}"
+                    gap = round(diff - (soma_ret + v_ded), 2)
+                    return f"⚠️ Divergência R$ {gap}"
 
                 df['Diagnostico'] = df.apply(realizar_diagnostico, axis=1)
 
-                # Organização de Colunas - REORDENADO COM TODAS AS COLUNAS PRESENTES
-                ordem_exibicao = [
-                    'Arquivo', 'Nota_Numero', 'Data_Emissao', 'Prestador_Razao', 'Vlr_Bruto', 
-                    'Vlr_Deducao', 'BC_PIS_COFINS', 'Vlr_Liquido', 'ISS_Valor', 'Ret_ISS', 
-                    'Ret_PIS', 'Ret_COFINS', 'Ret_CSLL', 'Ret_IRRF', 'Diagnostico', 'Descricao'
+                # ORDENAÇÃO COMPLETA DAS COLUNAS
+                cols = [
+                    'Arquivo', 'Nota_Numero', 'Data_Emissao', 'Prestador_Razao', 'Prestador_CNPJ',
+                    'Tomador_Razao', 'Tomador_CNPJ', 'Vlr_Bruto', 'Vlr_Deducao', 'BC_PIS_COFINS', 
+                    'Vlr_Liquido', 'ISS_Valor', 'Ret_ISS', 'Ret_PIS', 'Ret_COFINS', 'Ret_CSLL', 
+                    'Ret_IRRF', 'Diagnostico', 'Descricao'
                 ]
-                df = df[[c for c in ordem_exibicao if c in df.columns]]
+                df = df[[c for c in cols if c in df.columns]]
 
-                # Adição de Linha de Total Geral
+                # SUBTOTAIS
                 total_row = {col: "" for col in df.columns}
                 total_row['Arquivo'] = "TOTAL GERAL"
                 for col in cols_fin:
-                    if col in df.columns:
-                        total_row[col] = df[col].sum()
-                
-                df_final = pd.concat([df, pd.DataFrame([total_row])], ignore_index=True)
+                    total_row[col] = df[col].sum()
+                df_with_total = pd.concat([df, pd.DataFrame([total_row])], ignore_index=True)
 
                 st.success(f"✅ {len(df)} notas processadas!")
-                st.dataframe(df_final)
+                st.dataframe(df_with_total)
 
                 output = io.BytesIO()
                 with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                    df_final.to_excel(writer, index=False, sheet_name='PortalServTax')
+                    df_with_total.to_excel(writer, index=False, sheet_name='PortalServTax')
                     workbook = writer.book
                     worksheet = writer.sheets['PortalServTax']
-                    
-                    # Formatações do Excel
                     header_fmt = workbook.add_format({'bold': True, 'bg_color': '#FF69B4', 'font_color': 'white', 'border': 1})
-                    num_fmt = workbook.add_format({'num_format': '#,##0.00', 'border': 1})
+                    num_fmt = workbook.add_format({'num_format': '#,##0.00'})
                     total_fmt = workbook.add_format({'bold': True, 'bg_color': '#FFE4F2', 'num_format': '#,##0.00', 'border': 1})
-                    error_fmt = workbook.add_format({'font_color': 'red', 'border': 1})
                     
-                    # Filtros
-                    worksheet.autofilter(0, 0, len(df_final)-1, len(df_final.columns)-1)
+                    worksheet.autofilter(0, 0, len(df_with_total)-1, len(df_with_total.columns)-1)
                     
-                    for i, col in enumerate(df_final.columns):
+                    for i, col in enumerate(df_with_total.columns):
                         worksheet.write(0, i, col, header_fmt)
                         if col in cols_fin:
                             worksheet.set_column(i, i, 18, num_fmt)
                         else:
                             worksheet.set_column(i, i, 22)
                     
-                    # Formatação condicional para coluna Diagnostico
-                    diag_idx = df_final.columns.get_loc('Diagnostico')
-                    worksheet.conditional_format(1, diag_idx, len(df_final)-1, diag_idx, {
-                        'type': 'text', 'criteria': 'containing', 'value': 'Erro', 'format': error_fmt
-                    })
-                    
-                    # Linha de total no final do arquivo
-                    for i, col in enumerate(df_final.columns):
-                        val = df_final.iloc[-1][col]
-                        worksheet.write(len(df_final), i, val, total_fmt)
+                    # Linha de total no Excel
+                    for i, col in enumerate(df_with_total.columns):
+                        val = df_with_total.iloc[-1][col]
+                        worksheet.write(len(df_with_total), i, val, total_fmt)
 
                 st.download_button(
                     label="📥 BAIXAR EXCEL AJUSTADO",
@@ -283,5 +258,3 @@ if uploaded_files:
                     file_name="portal_servtax_auditoria.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
-
-# --- FIM DO CÓDIGO ---
