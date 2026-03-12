@@ -89,7 +89,7 @@ def get_xml_value(root, tags):
             element = root.find(f".//{tag}")
         if element is not None and element.text:
             return element.text.strip()
-    return "0.00" if any(x in str(tags).lower() for x in ['vlr', 'valor', 'iss', 'pis', 'cofins', 'ir', 'csll', 'liquido', 'trib', 'dedu', 'dr']) else ""
+    return "0.00" if any(x in str(tags).lower() for x in ['vlr', 'valor', 'iss', 'pis', 'cofins', 'ir', 'csll', 'liquido', 'trib']) else ""
 
 def process_xml_file(content, filename):
     try:
@@ -97,7 +97,6 @@ def process_xml_file(content, filename):
         root = tree.getroot()
         iss_retido_flag = get_xml_value(root, ['ISSRetido']).lower()
         tp_ret_flag = get_xml_value(root, ['tpRetISSQN'])
-        
         tp_ret_fed = get_xml_value(root, ['tpRetPisCofins'])
         
         row = {
@@ -111,15 +110,10 @@ def process_xml_file(content, filename):
             'Vlr_Bruto': get_xml_value(root, ['vServ', 'ValorServicos', 'vNF', 'vServPrest/vServ', 'ValorTotal', 'vServPrest']),
             'Vlr_Liquido': get_xml_value(root, ['vLiq', 'ValorLiquidoNFe', 'vLiqNFSe', 'vLiquido', 'vServPrest/vLiq']),
             'ISS_Valor': get_xml_value(root, ['vISS', 'ValorISS', 'vISSQN', 'iss/vISS']),
-            
-            # Captura de Deduções (Ajuste para Construção Civil)
-            'Vlr_Deducao': get_xml_value(root, ['vDR', 'vDedRed', 'vDeducoes', 'ValorDeducoes']),
-            
             'Ret_PIS': get_xml_value(root, ['vPIS', 'vPis', 'ValorPIS', 'vPIS_Ret', 'PISRetido', 'vRetPIS']) if tp_ret_fed == '1' else "0.00",
             'Ret_COFINS': get_xml_value(root, ['vCOFINS', 'vCofins', 'ValorCOFINS', 'vCOFINS_Ret', 'COFINSRetido', 'vRetCOFINS']) if tp_ret_fed == '1' else "0.00",
-            
             'Ret_CSLL': get_xml_value(root, ['vCSLL', 'ValorCSLL', 'vCSLL_Ret', 'CSLLRetido', 'vRetCSLL', 'vRetCSLL']),
-            'Ret_IRRF': get_xml_value(root, ['vRetIRRF', 'vIR', 'ValorIR', 'vIR_Ret', 'IRRetido', 'vRetIR', 'vIRRF', 'vRetIRRF']),
+            'Ret_IRRF': get_xml_value(root, ['vRetIRRF', 'vIR', 'ValorIR', 'vIR_Ret', 'IRRetido', 'vRetIR', 'vIRRF']),
             'Descricao': get_xml_value(root, ['CodigoServico', 'itemServico', 'cServ', 'xDescServ', 'Discriminacao', 'xServ', 'infCpl', 'xProd'])
         }
 
@@ -136,37 +130,10 @@ def process_xml_file(content, filename):
 # --- ÁREA VISUAL ---
 st.title("PORTAL TAX NFS-e - AUDITORIA FISCAL")
 
-col1, col2 = st.columns(2)
-
-with col1:
-    st.markdown("""
-    <div class="instrucoes-card">
-        <h3>📖 Passo a Passo</h3>
-        <ol>
-            <li><b>Upload:</b> Arraste arquivos <b>.XML</b> ou <b>.ZIP</b> abaixo.</li>
-            <li><b>Ação:</b> Clique em <b>"INICIAR AUDITORIA"</b>.</li>
-            <li><b>Conferência:</b> Analise o <b>Diagnóstico</b> de divergências.</li>
-            <li><b>Saída:</b> Baixe o Excel final para auditoria.</li>
-        </ol>
-    </div>
-    """, unsafe_allow_html=True)
-
-with col2:
-    st.markdown("""
-    <div class="instrucoes-card">
-        <h3>📊 O que será obtido?</h3>
-        <ul>
-            <li><b>Leitura Universal:</b> Dados de centenas de prefeituras consolidados.</li>
-            <li><b>Gestão de ISS:</b> Separação entre ISS Próprio e Retido.</li>
-            <li><b>Impostos Federais:</b> Captura de PIS, COFINS, CSLL e IRRF.</li>
-            <li><b>Deduções:</b> Agora captura abatimentos de base de cálculo (Construção Civil).</li>
-        </ul>
-    </div>
-    """, unsafe_allow_html=True)
-
-st.markdown("---")
-
 uploaded_files = st.file_uploader("Arraste os arquivos XML ou ZIP aqui", type=["xml", "zip"], accept_multiple_files=True)
+
+if 'df_memo' not in st.session_state:
+    st.session_state.df_memo = None
 
 if uploaded_files:
     if st.button("🚀 INICIAR AUDITORIA FISCAL"):
@@ -185,49 +152,72 @@ if uploaded_files:
 
             if data_rows:
                 df = pd.DataFrame(data_rows)
-                cols_fin = ['Vlr_Bruto', 'Vlr_Liquido', 'Vlr_Deducao', 'ISS_Valor', 'Ret_ISS', 'Ret_PIS', 'Ret_COFINS', 'Ret_CSLL', 'Ret_IRRF']
+                cols_fin = ['Vlr_Bruto', 'Vlr_Liquido', 'ISS_Valor', 'Ret_ISS', 'Ret_PIS', 'Ret_COFINS', 'Ret_CSLL', 'Ret_IRRF']
                 for col in cols_fin:
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
 
-                # --- DIAGNÓSTICO (Ajustado para considerar deduções) ---
                 def definir_diagnostico(r):
                     diff = round(r['Vlr_Bruto'] - r['Vlr_Liquido'], 2)
-                    # A diferença entre bruto e líquido deve ser igual à soma de Retenções + Deduções
-                    soma_abatimentos = round(r['Ret_ISS'] + r['Ret_PIS'] + r['Ret_COFINS'] + r['Ret_CSLL'] + r['Ret_IRRF'] + r['Vlr_Deducao'], 2)
-                    
-                    if abs(diff - soma_abatimentos) <= 0.01:
-                        return "✅"
-                    else:
-                        return f"⚠️ Divergência: R$ {round(diff - soma_abatimentos, 2)} (Diferença Líquida vs Abatimentos)"
+                    soma_ret = round(r['Ret_ISS'] + r['Ret_PIS'] + r['Ret_COFINS'] + r['Ret_CSLL'] + r['Ret_IRRF'], 2)
+                    return "✅" if abs(diff - soma_ret) <= 0.01 else f"⚠️ Divergência: R$ {round(diff - soma_ret, 2)}"
 
                 df['Diagnostico'] = df.apply(definir_diagnostico, axis=1)
-
+                
+                # Reorganizar ISS
                 cols = list(df.columns)
                 if 'Ret_ISS' in cols and 'ISS_Valor' in cols:
                     cols.insert(cols.index('ISS_Valor') + 1, cols.pop(cols.index('Ret_ISS')))
                     df = df[cols]
+                
+                st.session_state.df_memo = df
 
-                st.success(f"✅ {len(df)} notas processadas!")
-                st.dataframe(df)
+if st.session_state.df_memo is not None:
+    df = st.session_state.df_memo
+    st.dataframe(df)
 
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                    df.to_excel(writer, index=False, sheet_name='PortalServTax')
-                    workbook = writer.book
-                    worksheet = writer.sheets['PortalServTax']
-                    header_fmt = workbook.add_format({'bold': True, 'bg_color': '#FF69B4', 'font_color': 'white', 'border': 1})
-                    num_fmt = workbook.add_format({'num_format': '#,##0.00'})
-                    
-                    for i, col in enumerate(df.columns):
-                        worksheet.write(0, i, col, header_fmt)
-                        if col in cols_fin:
-                            worksheet.set_column(i, i, 18, num_fmt)
-                        else:
-                            worksheet.set_column(i, i, 22)
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        start_row = 15 # Desce bastante linhas para a tabela começar
+        df.to_excel(writer, index=False, sheet_name='Auditoria', startrow=start_row)
+        
+        workbook = writer.book
+        worksheet = writer.sheets['Auditoria']
+        
+        # Formatos
+        header_fmt = workbook.add_format({'bold': True, 'bg_color': '#FF69B4', 'font_color': 'white', 'border': 1})
+        subtotal_fmt = workbook.add_format({'bold': True, 'bg_color': '#F8F9FA', 'border': 1, 'num_format': '#,##0.00'})
+        num_fmt = workbook.add_format({'num_format': '#,##0.00'})
+        
+        # 1. SUBTOTAL NO TOPO (Linha 1)
+        cols_fin = ['Vlr_Bruto', 'Vlr_Liquido', 'ISS_Valor', 'Ret_ISS', 'Ret_PIS', 'Ret_COFINS', 'Ret_CSLL', 'Ret_IRRF']
+        for i, col_name in enumerate(df.columns):
+            if col_name in cols_fin:
+                col_letter = chr(65 + i) if i < 26 else f"{chr(64 + i//26)}{chr(65 + i%26)}"
+                # Fórmula SUBTOTAL(9, ...) ignora linhas filtradas
+                formula = f"=SUBTOTAL(9, {col_letter}{start_row+2}:{col_letter}{start_row + len(df) + 1})"
+                worksheet.write(0, i, formula, subtotal_fmt)
+                worksheet.write(1, i, f"Total {col_name}", workbook.add_format({'italic': True, 'font_size': 8}))
+            
+            # Larguras
+            width = 40 if col_name == 'Diagnostico' else 20
+            worksheet.set_column(i, i, width, num_fmt if col_name in cols_fin else None)
 
-                st.download_button(
-                    label="📥 BAIXAR EXCEL AJUSTADO",
-                    data=output.getvalue(),
-                    file_name="portal_servtax_auditoria.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
+        # 2. TRANSFORMAR EM TABELA (Para Segmentação)
+        num_rows, num_cols = df.shape
+        columns = [{'header': col} for col in df.columns]
+        worksheet.add_table(start_row, 0, start_row + num_rows, num_cols - 1, {
+            'columns': columns,
+            'style': 'TableStyleMedium 1'
+        })
+
+        # 3. SEGMENTAÇÃO DE DADOS (Slicers)
+        # Nota: XlsxWriter suporta criação de tabelas, mas segmentadores são objetos complexos.
+        # Criamos o filtro automático que já facilita muito.
+        worksheet.autofilter(start_row, 0, start_row + num_rows, num_cols - 1)
+
+    st.download_button(
+        label="📥 BAIXAR EXCEL PROFISSIONAL",
+        data=output.getvalue(),
+        file_name="portal_tax_auditoria.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
