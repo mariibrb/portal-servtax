@@ -67,15 +67,6 @@ def aplicar_estilo_sentinela_zonas():
             text-align: center;
             margin-bottom: 20px;
         }
-        
-        .instrucoes-card {
-            background-color: rgba(255, 255, 255, 0.7);
-            border-radius: 15px;
-            padding: 20px;
-            border-left: 5px solid #FF69B4;
-            margin-bottom: 20px;
-            height: 100%;
-        }
         </style>
     """, unsafe_allow_html=True)
 
@@ -87,7 +78,6 @@ def get_xml_value(root, tags):
         element = root.find(f".//{{*}}{tag}")
         if element is None:
             element = root.find(f".//{tag}")
-        
         if element is not None and element.text:
             return element.text.strip()
             
@@ -159,21 +149,31 @@ if uploaded_files:
                 for col in cols_fin:
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
 
-                # --- LÓGICA DE DIAGNÓSTICO RÍGIDA ---
+                # --- LÓGICA DE DIAGNÓSTICO INTELIGENTE (RESOLUÇÃO DO CONFLITO) ---
                 def realizar_diagnostico(r):
                     soma_ret = round(r['Ret_ISS'] + r['Ret_PIS'] + r['Ret_COFINS'] + r['Ret_CSLL'] + r['Ret_IRRF'], 2)
                     v_bruto = round(r['Vlr_Bruto'], 2)
                     v_liq = round(r['Vlr_Liquido'], 2)
                     v_ded = round(r['Vlr_Deducao'], 2)
                     
-                    # Prova Real Universal: Bruto - Dedução - Retenções = Líquido
-                    liquido_calculado = round(v_bruto - v_ded - soma_ret, 2)
+                    # Diferença observada entre Bruto e Líquido
+                    diff_observada = round(v_bruto - v_liq, 2)
+
+                    # Caso 1: A diferença é EXATAMENTE a soma das retenções (Dedução é só informativa)
+                    if abs(diff_observada - soma_ret) <= 0.05:
+                        return "✅ Ok: Bruto - Retenções = Líquido"
                     
-                    if abs(liquido_calculado - v_liq) <= 0.05:
-                        return "✅ Auditoria Ok."
-                    else:
-                        gap = round(liquido_calculado - v_liq, 2)
-                        return f"❌ Erro: Discrepância de R$ {gap}"
+                    # Caso 2: A diferença é a soma das retenções + a dedução (Dedução financeira/obra)
+                    if abs(diff_observada - (soma_ret + v_ded)) <= 0.05:
+                        return "✅ Ok: Bruto - Dedução - Retenções = Líquido"
+                    
+                    # Caso 3: Nota sem retenções, apenas dedução financeira
+                    if abs(diff_observada - v_ded) <= 0.05 and soma_ret == 0:
+                        return "✅ Ok: Bruto - Dedução = Líquido"
+
+                    # Se falhar em todos, calcula o erro com base no cenário mais provável (financeiro)
+                    gap = round(diff_observada - (soma_ret + v_ded), 2)
+                    return f"❌ Erro: Discrepância de R$ {gap}"
 
                 df['Diagnostico'] = df.apply(realizar_diagnostico, axis=1)
 
@@ -241,6 +241,5 @@ if uploaded_files:
                 )
 
 # --- PRÓXIMO PASSO ---
-# A coluna Vlr_Deducao agora isola o valor da tag <vDR> ou <vDedRed>.
-# Com isso, a conta (Bruto - Dedução - Retenções = Líquido) deve fechar.
-# Rodamos o teste para validar?
+# A auditoria agora valida se a dedução é financeira ou informativa automaticamente.
+# Deseja testar esse novo motor de auditoria?
