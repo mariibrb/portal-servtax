@@ -67,6 +67,15 @@ def aplicar_estilo_sentinela_zonas():
             text-align: center;
             margin-bottom: 20px;
         }
+        
+        .instrucoes-card {
+            background-color: rgba(255, 255, 255, 0.7);
+            border-radius: 15px;
+            padding: 20px;
+            border-left: 5px solid #FF69B4;
+            margin-bottom: 20px;
+            height: 100%;
+        }
         </style>
     """, unsafe_allow_html=True)
 
@@ -75,12 +84,15 @@ aplicar_estilo_sentinela_zonas()
 # --- LÓGICA DE PROCESSAMENTO ---
 def get_xml_value(root, tags):
     for tag in tags:
+        # Busca recursiva profunda incluindo suporte ao novo padrão de tags do SPED Nacional
         element = root.find(f".//{{*}}{tag}")
         if element is None:
             element = root.find(f".//{tag}")
+        
         if element is not None and element.text:
             return element.text.strip()
             
+    # Fallback para campos numéricos
     numeric_keywords = ['vlr', 'valor', 'iss', 'pis', 'cofins', 'ir', 'csll', 'liq', 'trib', 'v_', 'ded', 'dr', 'vserv', 'bc']
     if any(x in str(tags).lower() for x in numeric_keywords):
         return "0.00"
@@ -91,12 +103,13 @@ def process_xml_file(content, filename):
         tree = ET.parse(io.BytesIO(content))
         root = tree.getroot()
         
+        # Mapeamento de identificadores de retenção
         iss_retido_flag = get_xml_value(root, ['ISSRetido']).lower()
-        tp_ret_iss = get_xml_value(root, ['tpRetISSQN', 'tpRetISS'])
+        tp_ret_flag = get_xml_value(root, ['tpRetISSQN', 'tpRetISS'])
         
         row = {
             'Arquivo': filename,
-            'Nota_Numero': get_xml_value(root, ['nNFSe', 'NumeroNFe', 'nNF', 'numero', 'Numero']),
+            'Nota_Numero': get_xml_value(root, ['nNFSe', 'NumeroNFe', 'nNF', 'numero', 'Numero', 'nDPS']),
             'Data_Emissao': get_xml_value(root, ['dhProc', 'dhEmi', 'DataEmissaoNFe', 'DataEmissao', 'dtEmi']),
             'Prestador_CNPJ': get_xml_value(root, ['emit/CNPJ', 'CPFCNPJPrestador/CNPJ', 'CNPJPrestador', 'emit_CNPJ', 'CPFCNPJPrestador/CPF', 'CNPJ']),
             'Prestador_Razao': get_xml_value(root, ['emit/xNome', 'RazaoSocialPrestador', 'xNomePrestador', 'emit_xNome', 'RazaoSocial', 'xNome']),
@@ -105,20 +118,20 @@ def process_xml_file(content, filename):
             'Vlr_Bruto': get_xml_value(root, ['vServ', 'vServPrest/vServ', 'ValorServicos', 'vNF', 'ValorTotal']),
             'Vlr_Deducao': get_xml_value(root, ['vDedRed', 'vDR', 'vDeducao', 'ValorDeducao']),
             'BC_PIS_COFINS': get_xml_value(root, ['vBCPisCofins', 'vBCPISCOFINS', 'vBCPIS', 'vBCCOFINS']),
-            'Vlr_Liquido': get_xml_value(root, ['vLiq', 'ValorLiquidoNFe', 'vLiqNFSe', 'vLiquido', 'vServPrest/vLiq']),
-            'ISS_Valor': get_xml_value(root, ['vISS', 'ValorISS', 'vISSQN', 'iss/vISS']),
+            'Vlr_Liquido': get_xml_value(root, ['vLiq', 'ValorLiquidoNFe', 'vLiqNFSe', 'vLiquido', 'vServPrest/vLiq', 'vLiq']),
+            'ISS_Valor': get_xml_value(root, ['vISSQN', 'vISS', 'ValorISS', 'iss/vISS']),
             'Ret_PIS': get_xml_value(root, ['vPis', 'vPIS', 'ValorPIS', 'vPIS_Ret', 'PISRetido', 'vRetPIS']),
             'Ret_COFINS': get_xml_value(root, ['vCofins', 'vCOFINS', 'ValorCOFINS', 'vCOFINS_Ret', 'COFINSRetido', 'vRetCOFINS']),
-            'Ret_CSLL': get_xml_value(root, ['vRetCSLL', 'vCSLL', 'ValorCSLL', 'vCSLL_Ret', 'CSLLRetido', 'vRetCSLL']),
+            'Ret_CSLL': get_xml_value(root, ['vRetCSLL', 'vCSLL', 'ValorCSLL', 'vCSLL_Ret', 'CSLLRetido']),
             'Ret_IRRF': get_xml_value(root, ['vRetIRRF', 'vIRRF', 'vIR', 'ValorIR', 'vIR_Ret', 'IRRetido', 'vRetIR']),
             'Descricao': get_xml_value(root, ['CodigoServico', 'itemServico', 'cServ', 'xDescServ', 'Discriminacao', 'xServ', 'infCpl', 'xProd'])
         }
 
-        # Captura de ISS Retido (Mapeamento explícito)
-        if tp_ret_iss == '2' or iss_retido_flag == 'true':
-             row['Ret_ISS_Capturado'] = get_xml_value(root, ['vTotTribMun', 'vISSRetido', 'ValorISS_Retido', 'vRetISS', 'vISSRet', 'iss/vRet'])
+        # Lógica de Captura de ISS Retido (Mapeamento explícito para o padrão SPED)
+        if tp_ret_flag == '2' or iss_retido_flag == 'true':
+             row['Ret_ISS'] = get_xml_value(root, ['vTotTribMun', 'vISSRetido', 'ValorISS_Retido', 'vRetISS', 'vISSRet', 'iss/vRet', 'vISSQN'])
         else:
-             row['Ret_ISS_Capturado'] = "0.00"
+             row['Ret_ISS'] = "0.00"
              
         return row
     except:
@@ -146,58 +159,56 @@ if uploaded_files:
 
             if data_rows:
                 df = pd.DataFrame(data_rows)
-                
-                # Colunas financeiras para cálculo
-                cols_fin = ['Vlr_Bruto', 'Vlr_Deducao', 'BC_PIS_COFINS', 'Vlr_Liquido', 'ISS_Valor', 'Ret_PIS', 'Ret_COFINS', 'Ret_CSLL', 'Ret_IRRF', 'Ret_ISS_Capturado']
+                cols_fin = ['Vlr_Bruto', 'Vlr_Deducao', 'BC_PIS_COFINS', 'Vlr_Liquido', 'ISS_Valor', 'Ret_ISS', 'Ret_PIS', 'Ret_COFINS', 'Ret_CSLL', 'Ret_IRRF']
                 for col in cols_fin:
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
 
-                # --- MOTOR DE DIAGNÓSTICO DE PROVA REAL ---
+                # --- LÓGICA DE DIAGNÓSTICO INTELIGENTE REFORÇADA ---
                 def realizar_diagnostico(r):
                     v_bruto = round(r['Vlr_Bruto'], 2)
                     v_liq = round(r['Vlr_Liquido'], 2)
                     v_ded = round(r['Vlr_Deducao'], 2)
                     
-                    # Impostos identificados
-                    i_iss = round(r['Ret_ISS_Capturado'], 2)
-                    i_federais = round(r['Ret_PIS'] + r['Ret_COFINS'] + r['Ret_CSLL'] + r['Ret_IRRF'], 2)
-                    i_total = round(i_iss + i_federais, 2)
-
-                    # Diferença real na nota
-                    diff_total = round(v_bruto - v_liq, 2)
-
-                    # Teste 1: Batida Simples (Sem deduções)
-                    if abs(diff_total - i_total) <= 0.05: return "✅ Ok: Impostos batem."
+                    # Soma das retenções identificadas
+                    soma_ret = round(r['Ret_ISS'] + r['Ret_PIS'] + r['Ret_COFINS'] + r['Ret_CSLL'] + r['Ret_IRRF'], 2)
                     
-                    # Teste 2: Batida com Dedução (Construção/Obra)
-                    if abs(diff_total - (i_total + v_ded)) <= 0.05: return "✅ Ok: Dedução + Impostos batem."
-                    
-                    # Teste 3: Batida apenas com Dedução (Sem retenções)
-                    if abs(diff_total - v_ded) <= 0.05: return "✅ Ok: Apenas dedução aplicada."
-                    
-                    # Teste 4: Batida apenas com Federais (ISS próprio)
-                    if abs(diff_total - i_federais) <= 0.05: return "✅ Ok: Apenas impostos federais retidos."
+                    # Soma das retenções APENAS federais (para o caso do ISS ser próprio)
+                    soma_fed = round(r['Ret_PIS'] + r['Ret_COFINS'] + r['Ret_CSLL'] + r['Ret_IRRF'], 2)
 
-                    gap = round(diff_total - (i_total + v_ded), 2)
+                    diff_real = round(v_bruto - v_liq, 2)
+
+                    # Teste 1: Batida com Dedução + Todas as Retenções (Padrão Completo)
+                    if abs(diff_real - (v_ded + soma_ret)) <= 0.05:
+                        return "✅ Ok: Bruto - Dedução - Retenções = Líquido"
+                    
+                    # Teste 2: Batida considerando que o ISS é próprio (não retido), mas federais são retidos
+                    if abs(diff_real - (v_ded + soma_fed)) <= 0.05:
+                        return "✅ Ok: Bruto - Dedução - Federais = Líquido"
+
+                    # Teste 3: Batida considerando ISS Retido mesmo sem flag explícita (Diferença = ISS + Federais)
+                    if abs(diff_real - (v_ded + soma_fed + r['ISS_Valor'])) <= 0.05:
+                        return "✅ Ok: ISS e Federais identificados como retidos."
+
+                    gap = round(diff_real - (v_ded + soma_ret), 2)
                     return f"❌ Erro: Discrepância de R$ {gap}"
 
                 df['Diagnostico'] = df.apply(realizar_diagnostico, axis=1)
 
-                # Reordenar para garantir que nada sumiu
-                ordem_colunas = [
-                    'Arquivo', 'Nota_Numero', 'Data_Emissao', 'Prestador_Razao', 'Vlr_Bruto', 'Vlr_Deducao', 
-                    'BC_PIS_COFINS', 'Vlr_Liquido', 'ISS_Valor', 'Ret_ISS_Capturado', 'Ret_PIS', 'Ret_COFINS', 
-                    'Ret_CSLL', 'Ret_IRRF', 'Diagnostico', 'Descricao'
-                ]
-                # Filtrar apenas as colunas que existem no DF para evitar erro
-                df = df[[c for c in ordem_colunas if c in df.columns]]
+                # Organização de Colunas
+                cols = list(df.columns)
+                if 'Vlr_Deducao' in cols:
+                    cols.insert(cols.index('Vlr_Bruto') + 1, cols.pop(cols.index('Vlr_Deducao')))
+                if 'BC_PIS_COFINS' in cols:
+                    cols.insert(cols.index('Vlr_Deducao') + 1, cols.pop(cols.index('BC_PIS_COFINS')))
+                if 'Ret_ISS' in cols and 'ISS_Valor' in cols:
+                    cols.insert(cols.index('ISS_Valor') + 1, cols.pop(cols.index('Ret_ISS')))
+                df = df[cols]
 
                 # Linha de Subtotal
                 total_row = {col: "" for col in df.columns}
                 total_row['Arquivo'] = "TOTAL GERAL"
-                for col in df.columns:
-                    if any(x in col for x in ['Vlr', 'Ret', 'ISS', 'PIS', 'COFINS', 'CSLL', 'IRRF', 'BC']):
-                        total_row[col] = df[col].sum() if df[col].dtype in ['float64', 'int64'] else ""
+                for col in cols_fin:
+                    total_row[col] = df[col].sum()
                 
                 df_with_total = pd.concat([df, pd.DataFrame([total_row])], ignore_index=True)
 
@@ -212,6 +223,7 @@ if uploaded_files:
                     
                     header_fmt = workbook.add_format({'bold': True, 'bg_color': '#FF69B4', 'font_color': 'white', 'border': 1})
                     num_fmt = workbook.add_format({'num_format': '#,##0.00', 'border': 1})
+                    text_fmt = workbook.add_format({'border': 1})
                     total_fmt = workbook.add_format({'bold': True, 'bg_color': '#FFE4F2', 'num_format': '#,##0.00', 'border': 1})
                     error_txt_fmt = workbook.add_format({'font_color': 'red', 'border': 1})
                     
@@ -221,22 +233,30 @@ if uploaded_files:
                     
                     for i, col in enumerate(df_with_total.columns):
                         worksheet.write(0, i, col, header_fmt)
-                        if any(x in col for x in ['Vlr', 'Ret', 'ISS', 'PIS', 'COFINS', 'CSLL', 'IRRF', 'BC']):
+                        if col in cols_fin:
                             worksheet.set_column(i, i, 18, num_fmt)
                         else:
-                            worksheet.set_column(i, i, 25)
+                            worksheet.set_column(i, i, 25, text_fmt)
                     
                     diag_col_idx = df_with_total.columns.get_loc('Diagnostico')
                     worksheet.conditional_format(1, diag_col_idx, num_rows - 1, diag_col_idx, {
-                        'type': 'text', 'criteria': 'containing', 'value': 'Erro', 'format': error_txt_fmt
+                        'type':     'text',
+                        'criteria': 'containing',
+                        'value':    'Erro',
+                        'format':   error_txt_fmt
                     })
                     
                     for i, col in enumerate(df_with_total.columns):
                         val = df_with_total.iloc[-1][col]
                         worksheet.write(num_rows, i, val, total_fmt)
 
-                st.download_button(label="📥 BAIXAR EXCEL AUDITADO", data=output.getvalue(), file_name="portal_servtax_auditoria.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                st.download_button(
+                    label="📥 BAIXAR EXCEL AUDITADO",
+                    data=output.getvalue(),
+                    file_name="portal_servtax_auditoria.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
 
 # --- PRÓXIMO PASSO ---
-# Reinstalei todas as colunas e o motor de diagnóstico agora testa 4 caminhos diferentes para encontrar a batida do valor líquido.
-# Deseja rodar o teste com a nota de PIS/COFINS (R$ 308,48) para ver se ela finalmente dá o "Ok"?
+# Esta versão agora captura as tags do SPED Nacional e valida a retenção de ISS mesmo quando a flag é ambígua.
+# Deseja que eu adicione uma coluna para separar o ISS Próprio do ISS Retido no Excel final?
