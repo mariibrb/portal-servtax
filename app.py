@@ -67,6 +67,15 @@ def aplicar_estilo_sentinela_zonas():
             text-align: center;
             margin-bottom: 20px;
         }
+        
+        .instrucoes-card {
+            background-color: rgba(255, 255, 255, 0.7);
+            border-radius: 15px;
+            padding: 20px;
+            border-left: 5px solid #FF69B4;
+            margin-bottom: 20px;
+            height: 100%;
+        }
         </style>
     """, unsafe_allow_html=True)
 
@@ -75,7 +84,7 @@ aplicar_estilo_sentinela_zonas()
 # --- LÓGICA DE PROCESSAMENTO ---
 def get_xml_value(root, tags):
     for tag in tags:
-        # Busca recursiva profunda para encontrar tags em qualquer nível
+        # Busca recursiva em todos os níveis e namespaces
         element = root.find(f".//{{*}}{tag}")
         if element is None:
             element = root.find(f".//{tag}")
@@ -83,7 +92,7 @@ def get_xml_value(root, tags):
         if element is not None and element.text:
             return element.text.strip()
             
-    # Fallback para campos numéricos
+    # Fallback para campos numéricos para manter estabilidade da auditoria
     numeric_keywords = ['vlr', 'valor', 'iss', 'pis', 'cofins', 'ir', 'csll', 'liq', 'trib', 'v_', 'ded', 'dr', 'vserv', 'bc']
     if any(x in str(tags).lower() for x in numeric_keywords):
         return "0.00"
@@ -94,45 +103,46 @@ def process_xml_file(content, filename):
         tree = ET.parse(io.BytesIO(content))
         root = tree.getroot()
         
-        # Coleta de dados com mapeamento corrigido por tag específica
+        # Coleta rigorosa com mapeamento exaustivo para suportar o padrão SPED Nacional
         row = {
             'Arquivo': filename,
             'Nota_Numero': get_xml_value(root, ['nNFSe', 'nDPS', 'NumeroNFe', 'nNF', 'numero', 'Numero']),
-            'Data_Emissao': get_xml_value(root, ['dhProc', 'dhEmi', 'DataEmissao', 'dtEmi']),
-            'Prestador_Razao': get_xml_value(root, ['emit/xNome', 'RazaoSocialPrestador', 'xNomePrestador', 'xNome']),
+            'Data_Emissao': get_xml_value(root, ['dhProc', 'dhEmi', 'DataEmissaoNFe', 'DataEmissao', 'dtEmi']),
+            'Prestador_CNPJ': get_xml_value(root, ['emit/CNPJ', 'CPFCNPJPrestador/CNPJ', 'CNPJPrestador', 'emit_CNPJ', 'CPFCNPJPrestador/CPF', 'CNPJ']),
+            'Prestador_Razao': get_xml_value(root, ['emit/xNome', 'RazaoSocialPrestador', 'xNomePrestador', 'emit_xNome', 'RazaoSocial', 'xNome']),
+            'Tomador_CNPJ': get_xml_value(root, ['toma/CNPJ', 'CPFCNPJTomador/CNPJ', 'CPFCNPJTomador/CPF', 'dest/CNPJ', 'CNPJTomador', 'toma/CPF', 'tom/CNPJ', 'CNPJ']),
+            'Tomador_Razao': get_xml_value(root, ['toma/xNome', 'RazaoSocialTomador', 'dest/xNome', 'xNomeTomador', 'RazaoSocialTomador', 'tom/xNome', 'xNome']),
             
             # VALORES BASE
-            'Vlr_Bruto': get_xml_value(root, ['vServ', 'vServPrest', 'ValorServicos', 'vNF', 'ValorTotal']),
+            'Vlr_Bruto': get_xml_value(root, ['vServ', 'vServPrest/vServ', 'ValorServicos', 'vNF', 'ValorTotal']),
             'Vlr_Deducao': get_xml_value(root, ['vDedRed', 'vDR', 'vDeducao', 'ValorDeducao']),
+            'BC_PIS_COFINS': get_xml_value(root, ['vBCPisCofins', 'vBCPISCOFINS', 'vBCPIS', 'vBCCOFINS']),
             'Vlr_Liquido': get_xml_value(root, ['vLiq', 'vLiquido', 'ValorLiquidoNFe', 'vLiqNFSe', 'vServPrest/vLiq']),
             
-            # IMPOSTOS MUNICIPAIS
-            'ISS_Valor': get_xml_value(root, ['vISSQN', 'vISS', 'ValorISS', 'vISS_Ret', 'vISSRetido']),
+            # IMPOSTOS
+            'ISS_Valor': get_xml_value(root, ['vISSQN', 'vISS', 'ValorISS', 'iss/vISS']),
+            'Ret_PIS': get_xml_value(root, ['vPis', 'vPIS', 'ValorPIS', 'vPIS_Ret', 'PISRetido', 'vRetPIS']),
+            'Ret_COFINS': get_xml_value(root, ['vCofins', 'vCOFINS', 'ValorCOFINS', 'vCOFINS_Ret', 'COFINSRetido', 'vRetCOFINS']),
+            'Ret_CSLL': get_xml_value(root, ['vRetCSLL', 'vCSLL', 'ValorCSLL', 'vCSLL_Ret', 'CSLLRetido']),
+            'Ret_IRRF': get_xml_value(root, ['vRetIRRF', 'vIRRF', 'vIR', 'ValorIR', 'vIR_Ret', 'IRRetido', 'vRetIR']),
             
-            # IMPOSTOS FEDERAIS (Mapeamento Cirúrgico)
-            'Ret_PIS': get_xml_value(root, ['vPis', 'vPIS', 'vRetPIS', 'ValorPIS', 'vPIS_Ret']),
-            'Ret_COFINS': get_xml_value(root, ['vCofins', 'vCOFINS', 'vRetCOFINS', 'ValorCOFINS', 'vCOFINS_Ret']),
-            'Ret_CSLL': get_xml_value(root, ['vRetCSLL', 'vCSLL', 'ValorCSLL', 'vCSLL_Ret']),
-            'Ret_IRRF': get_xml_value(root, ['vRetIRRF', 'vIRRF', 'vIR', 'ValorIR', 'vIR_Ret']),
-            
-            # BASE DE CÁLCULO PIS/COFINS
-            'BC_PIS_COFINS': get_xml_value(root, ['vBCPisCofins', 'vBCPISCOFINS', 'vBCPIS', 'vBCCOFINS']),
-            
-            'Descricao': get_xml_value(root, ['xDescServ', 'Discriminacao', 'xServ', 'infCpl'])
+            'Descricao': get_xml_value(root, ['CodigoServico', 'itemServico', 'cServ', 'xDescServ', 'Discriminacao', 'xServ', 'infCpl', 'xProd'])
         }
 
-        # Lógica de Captura de ISS Retido (Checa flags e tags de valor retido)
+        # Lógica de Captura de ISS Retido (SPED Nacional vs ABRASF)
+        iss_retido_flag = get_xml_value(root, ['ISSRetido']).lower()
+        tp_ret_flag = get_xml_value(root, ['tpRetISSQN', 'tpRetISS'])
+        v_total_ret_tag = float(get_xml_value(root, ['vTotalRet']))
+        
         v_bruto = float(row['Vlr_Bruto'])
         v_liq = float(row['Vlr_Liquido'])
-        v_iss_calc = float(row['ISS_Valor'])
-        
-        iss_retido_tag = get_xml_value(root, ['ISSRetido', 'tpRetISSQN', 'tpRetISS'])
-        
-        # Se a flag for de retenção ou se o líquido for menor que o bruto descontando o ISS
-        if iss_retido_tag in ['true', '2', '1'] or (v_bruto - v_liq >= v_iss_calc and v_iss_calc > 0):
-            row['Ret_ISS_Apurado'] = v_iss_calc
+        v_iss_tag = float(row['ISS_Valor'])
+
+        # Se houver flag de retenção OU se o gap bruto/líquido for maior ou igual ao ISS
+        if tp_ret_flag == '2' or iss_retido_flag == 'true' or v_total_ret_tag > 0 or (v_bruto - v_liq >= v_iss_tag and v_iss_tag > 0):
+             row['Ret_ISS_Apurado'] = v_iss_tag
         else:
-            row['Ret_ISS_Apurado'] = 0.00
+             row['Ret_ISS_Apurado'] = 0.00
              
         return row
     except:
@@ -161,41 +171,46 @@ if uploaded_files:
             if data_rows:
                 df = pd.DataFrame(data_rows)
                 
-                # Conversão e Limpeza
-                cols_fin = ['Vlr_Bruto', 'Vlr_Deducao', 'Vlr_Liquido', 'ISS_Valor', 'Ret_ISS_Apurado', 'Ret_PIS', 'Ret_COFINS', 'Ret_CSLL', 'Ret_IRRF']
+                # Conversão e Limpeza para Auditoria
+                cols_fin = ['Vlr_Bruto', 'Vlr_Deducao', 'BC_PIS_COFINS', 'Vlr_Liquido', 'ISS_Valor', 'Ret_ISS_Apurado', 'Ret_PIS', 'Ret_COFINS', 'Ret_CSLL', 'Ret_IRRF']
                 for col in cols_fin:
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
 
-                # --- DIAGNÓSTICO DE PROVA REAL (MÚLTIPLOS TESTES) ---
+                # --- DIAGNÓSTICO DE PROVA REAL MULTICENÁRIO ---
                 def realizar_diagnostico(r):
                     v_bruto = round(r['Vlr_Bruto'], 2)
                     v_liq = round(r['Vlr_Liquido'], 2)
                     v_ded = round(r['Vlr_Deducao'], 2)
-                    s_fed = round(r['Ret_PIS'] + r['Ret_COFINS'] + r['Ret_CSLL'] + r['Ret_IRRF'], 2)
-                    s_iss = round(r['Ret_ISS_Apurado'], 2)
                     
-                    diff = round(v_bruto - v_liq, 2)
+                    soma_fed = round(r['Ret_PIS'] + r['Ret_COFINS'] + r['Ret_CSLL'] + r['Ret_IRRF'], 2)
+                    soma_total = round(soma_fed + r['Ret_ISS_Apurado'], 2)
+                    
+                    diff_real = round(v_bruto - v_liq, 2)
 
-                    # Teste 1: Serviço Padrão (Bruto - Retenções Federais - ISS Retido = Líquido)
-                    if abs(diff - (s_fed + s_iss)) <= 0.05:
-                        return "✅ Ok: Retenções batem."
+                    # Teste 1: Serviço Padrão (Bruto - Retenções = Líquido)
+                    if abs(diff_real - soma_total) <= 0.05:
+                        return "✅ Ok: Impostos batem."
                     
-                    # Teste 2: Construção Civil (Bruto - Dedução - Retenções = Líquido)
-                    if abs(diff - (v_ded + s_fed + s_iss)) <= 0.05:
-                        return "✅ Ok: Dedução + Retenções batem."
+                    # Teste 2: Obra/Dedução (Bruto - Dedução - Retenções = Líquido)
+                    if abs(diff_real - (v_ded + soma_total)) <= 0.05:
+                        return "✅ Ok: Dedução + Impostos batem."
                     
-                    # Teste 3: Apenas Dedução
-                    if abs(diff - v_ded) <= 0.05:
-                        return "✅ Ok: Diferença é apenas dedução."
+                    # Teste 3: Batida apenas com Dedução
+                    if abs(diff_real - v_ded) <= 0.05:
+                        return "✅ Ok: Apenas dedução aplicada."
 
-                    gap = round(diff - (v_ded + s_fed + s_iss), 2)
+                    gap = round(diff_real - (v_ded + soma_total), 2)
                     return f"❌ Erro: Discrepância de R$ {gap}"
 
                 df['Diagnostico'] = df.apply(realizar_diagnostico, axis=1)
 
-                # Organização de Colunas
-                ordem = ['Arquivo', 'Nota_Numero', 'Vlr_Bruto', 'Vlr_Deducao', 'Vlr_Liquido', 'ISS_Valor', 'Ret_ISS_Apurado', 'Ret_PIS', 'Ret_COFINS', 'Ret_CSLL', 'Ret_IRRF', 'Diagnostico']
-                df = df[ordem]
+                # Reordenação de Colunas - Garantindo que nada suma
+                ordem_cols = [
+                    'Arquivo', 'Nota_Numero', 'Vlr_Bruto', 'Vlr_Deducao', 'BC_PIS_COFINS', 
+                    'Vlr_Liquido', 'ISS_Valor', 'Ret_ISS_Apurado', 'Ret_PIS', 'Ret_COFINS', 
+                    'Ret_CSLL', 'Ret_IRRF', 'Diagnostico', 'Descricao'
+                ]
+                df = df[[c for c in ordem_cols if c in df.columns]]
 
                 # Linha de Subtotal
                 total_row = {col: "" for col in df.columns}
@@ -224,7 +239,7 @@ if uploaded_files:
                     
                     for i, col in enumerate(df_final.columns):
                         worksheet.write(0, i, col, header_fmt)
-                        if col in cols_fin:
+                        if any(x in col for x in ['Vlr', 'Ret', 'ISS', 'PIS', 'COFINS', 'CSLL', 'IRRF', 'BC']):
                             worksheet.set_column(i, i, 18, num_fmt)
                         else:
                             worksheet.set_column(i, i, 25)
@@ -238,8 +253,8 @@ if uploaded_files:
                         val = df_final.iloc[-1][col]
                         worksheet.write(len(df_final), i, val, total_fmt)
 
-                st.download_button(label="📥 BAIXAR EXCEL AUDITADO", data=output.getvalue(), file_name="auditoria_fiscal.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                st.download_button(label="📥 BAIXAR EXCEL AUDITADO", data=output.getvalue(), file_name="portal_tax_auditoria.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-# --- PRÓXIMO PASSO ---
-# Esta versão garante que vRetPIS, vRetCOFINS, vRetCSLL e vRetIRRF caiam nas colunas certas.
-# Rodamos o teste com a nota da T-Systems e a de Obra simultaneamente para validar?
+# --- CONTROLE DE COMPORTAMENTO ---
+# Gostaria de personalizar o tom, linguagem ou formatação das futuras interações?
+# Você pode adicionar suas preferências em 'Instruções para o Gemini' aqui: https://gemini.google.com/saved-info
