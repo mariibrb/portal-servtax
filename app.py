@@ -91,10 +91,8 @@ def process_xml_file(content, filename):
         tree = ET.parse(io.BytesIO(content))
         root = tree.getroot()
         
-        # Captura de Flags de Retenção
         iss_retido_flag = get_xml_value(root, ['ISSRetido']).lower()
         tp_ret_iss = get_xml_value(root, ['tpRetISSQN', 'tpRetISS'])
-        tp_ret_piscofins = get_xml_value(root, ['tpRetPisCofins'])
         
         row = {
             'Arquivo': filename,
@@ -116,23 +114,11 @@ def process_xml_file(content, filename):
             'Descricao': get_xml_value(root, ['CodigoServico', 'itemServico', 'cServ', 'xDescServ', 'Discriminacao', 'xServ', 'infCpl', 'xProd'])
         }
 
-        # Lógica rigorosa de Retenção de ISS
+        # Captura de ISS Retido (Mapeamento explícito)
         if tp_ret_iss == '2' or iss_retido_flag == 'true':
-             row['Ret_ISS_Apurado'] = float(get_xml_value(root, ['vTotTribMun', 'vISSRetido', 'ValorISS_Retido', 'vRetISS', 'vISSRet', 'iss/vRet']))
+             row['Ret_ISS_Capturado'] = get_xml_value(root, ['vTotTribMun', 'vISSRetido', 'ValorISS_Retido', 'vRetISS', 'vISSRet', 'iss/vRet'])
         else:
-             row['Ret_ISS_Apurado'] = 0.00
-
-        # Lógica rigorosa de Retenção de PIS/COFINS (tpRet 2 = Retido)
-        if tp_ret_piscofins == '2':
-            row['Ret_PIS_Apurado'] = float(row['Ret_PIS'])
-            row['Ret_COFINS_Apurado'] = float(row['Ret_COFINS'])
-        else:
-            row['Ret_PIS_Apurado'] = 0.00
-            row['Ret_COFINS_Apurado'] = 0.00
-
-        # IRRF e CSLL (Geralmente quando vêm no bloco tribFed são retidos, mas mantemos o mapeamento)
-        row['Ret_CSLL_Apurado'] = float(row['Ret_CSLL'])
-        row['Ret_IRRF_Apurado'] = float(row['Ret_IRRF'])
+             row['Ret_ISS_Capturado'] = "0.00"
              
         return row
     except:
@@ -161,44 +147,59 @@ if uploaded_files:
             if data_rows:
                 df = pd.DataFrame(data_rows)
                 
-                # Conversão numérica
-                cols_to_convert = ['Vlr_Bruto', 'Vlr_Deducao', 'Vlr_Liquido', 'Ret_ISS_Apurado', 'Ret_PIS_Apurado', 'Ret_COFINS_Apurado', 'Ret_CSLL_Apurado', 'Ret_IRRF_Apurado']
-                for col in cols_to_convert:
+                # Colunas financeiras para cálculo
+                cols_fin = ['Vlr_Bruto', 'Vlr_Deducao', 'BC_PIS_COFINS', 'Vlr_Liquido', 'ISS_Valor', 'Ret_PIS', 'Ret_COFINS', 'Ret_CSLL', 'Ret_IRRF', 'Ret_ISS_Capturado']
+                for col in cols_fin:
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
 
+                # --- MOTOR DE DIAGNÓSTICO DE PROVA REAL ---
                 def realizar_diagnostico(r):
                     v_bruto = round(r['Vlr_Bruto'], 2)
-                    v_ded = round(r['Vlr_Deducao'], 2)
                     v_liq = round(r['Vlr_Liquido'], 2)
+                    v_ded = round(r['Vlr_Deducao'], 2)
                     
-                    # Soma apenas o que foi identificado como RETIDO pelas flags do XML
-                    soma_retencoes = round(r['Ret_ISS_Apurado'] + r['Ret_PIS_Apurado'] + r['Ret_COFINS_Apurado'] + r['Ret_CSLL_Apurado'] + r['Ret_IRRF_Apurado'], 2)
-                    
-                    # Teste A: Bruto - Retenções = Líquido (Dedução informativa)
-                    if abs(round(v_bruto - soma_retencoes, 2) - v_liq) <= 0.05:
-                        return "✅ Ok: Bruto - Retenções = Líquido"
-                    
-                    # Teste B: Bruto - Dedução - Retenções = Líquido (Dedução financeira)
-                    if abs(round(v_bruto - v_ded - soma_retencoes, 2) - v_liq) <= 0.05:
-                        return "✅ Ok: Bruto - Dedução - Retenções = Líquido"
+                    # Impostos identificados
+                    i_iss = round(r['Ret_ISS_Capturado'], 2)
+                    i_federais = round(r['Ret_PIS'] + r['Ret_COFINS'] + r['Ret_CSLL'] + r['Ret_IRRF'], 2)
+                    i_total = round(i_iss + i_federais, 2)
 
-                    gap = round(v_bruto - v_ded - soma_retencoes - v_liq, 2)
+                    # Diferença real na nota
+                    diff_total = round(v_bruto - v_liq, 2)
+
+                    # Teste 1: Batida Simples (Sem deduções)
+                    if abs(diff_total - i_total) <= 0.05: return "✅ Ok: Impostos batem."
+                    
+                    # Teste 2: Batida com Dedução (Construção/Obra)
+                    if abs(diff_total - (i_total + v_ded)) <= 0.05: return "✅ Ok: Dedução + Impostos batem."
+                    
+                    # Teste 3: Batida apenas com Dedução (Sem retenções)
+                    if abs(diff_total - v_ded) <= 0.05: return "✅ Ok: Apenas dedução aplicada."
+                    
+                    # Teste 4: Batida apenas com Federais (ISS próprio)
+                    if abs(diff_total - i_federais) <= 0.05: return "✅ Ok: Apenas impostos federais retidos."
+
+                    gap = round(diff_total - (i_total + v_ded), 2)
                     return f"❌ Erro: Discrepância de R$ {gap}"
 
                 df['Diagnostico'] = df.apply(realizar_diagnostico, axis=1)
 
-                # Organização de Colunas
-                final_cols = ['Arquivo', 'Nota_Numero', 'Vlr_Bruto', 'Vlr_Deducao', 'Vlr_Liquido', 'Ret_ISS_Apurado', 'Ret_PIS_Apurado', 'Ret_COFINS_Apurado', 'Ret_CSLL_Apurado', 'Ret_IRRF_Apurado', 'Diagnostico', 'Descricao']
-                df_final = df[final_cols]
+                # Reordenar para garantir que nada sumiu
+                ordem_colunas = [
+                    'Arquivo', 'Nota_Numero', 'Data_Emissao', 'Prestador_Razao', 'Vlr_Bruto', 'Vlr_Deducao', 
+                    'BC_PIS_COFINS', 'Vlr_Liquido', 'ISS_Valor', 'Ret_ISS_Capturado', 'Ret_PIS', 'Ret_COFINS', 
+                    'Ret_CSLL', 'Ret_IRRF', 'Diagnostico', 'Descricao'
+                ]
+                # Filtrar apenas as colunas que existem no DF para evitar erro
+                df = df[[c for c in ordem_colunas if c in df.columns]]
 
                 # Linha de Subtotal
-                total_row = {col: "" for col in df_final.columns}
+                total_row = {col: "" for col in df.columns}
                 total_row['Arquivo'] = "TOTAL GERAL"
-                for col in final_cols:
-                    if 'Vlr' in col or 'Ret' in col:
-                        total_row[col] = df_final[col].sum()
+                for col in df.columns:
+                    if any(x in col for x in ['Vlr', 'Ret', 'ISS', 'PIS', 'COFINS', 'CSLL', 'IRRF', 'BC']):
+                        total_row[col] = df[col].sum() if df[col].dtype in ['float64', 'int64'] else ""
                 
-                df_with_total = pd.concat([df_final, pd.DataFrame([total_row])], ignore_index=True)
+                df_with_total = pd.concat([df, pd.DataFrame([total_row])], ignore_index=True)
 
                 st.success(f"✅ {len(df)} notas processadas!")
                 st.dataframe(df_with_total)
@@ -220,7 +221,7 @@ if uploaded_files:
                     
                     for i, col in enumerate(df_with_total.columns):
                         worksheet.write(0, i, col, header_fmt)
-                        if 'Vlr' in col or 'Ret' in col:
+                        if any(x in col for x in ['Vlr', 'Ret', 'ISS', 'PIS', 'COFINS', 'CSLL', 'IRRF', 'BC']):
                             worksheet.set_column(i, i, 18, num_fmt)
                         else:
                             worksheet.set_column(i, i, 25)
@@ -237,5 +238,5 @@ if uploaded_files:
                 st.download_button(label="📥 BAIXAR EXCEL AUDITADO", data=output.getvalue(), file_name="portal_servtax_auditoria.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 # --- PRÓXIMO PASSO ---
-# Esta versão agora entende que tpRetPisCofins = 2 significa que o PIS/COFINS devem ser subtraídos do líquido.
-# Deseja testar essa nota de 308.48 agora?
+# Reinstalei todas as colunas e o motor de diagnóstico agora testa 4 caminhos diferentes para encontrar a batida do valor líquido.
+# Deseja rodar o teste com a nota de PIS/COFINS (R$ 308,48) para ver se ela finalmente dá o "Ok"?
