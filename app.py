@@ -84,7 +84,7 @@ aplicar_estilo_sentinela_zonas()
 # --- LÓGICA DE PROCESSAMENTO ---
 def get_xml_value(root, tags):
     for tag in tags:
-        # Busca recursiva em todos os níveis e namespaces
+        # Busca recursiva em todos os níveis para não perder tags aninhadas
         element = root.find(f".//{{*}}{tag}")
         if element is None:
             element = root.find(f".//{tag}")
@@ -92,7 +92,7 @@ def get_xml_value(root, tags):
         if element is not None and element.text:
             return element.text.strip()
             
-    # Fallback para campos numéricos para manter estabilidade da auditoria
+    # Fallback para campos numéricos para evitar erros de processamento
     numeric_keywords = ['vlr', 'valor', 'iss', 'pis', 'cofins', 'ir', 'csll', 'liq', 'trib', 'v_', 'ded', 'dr', 'vserv', 'bc']
     if any(x in str(tags).lower() for x in numeric_keywords):
         return "0.00"
@@ -103,7 +103,7 @@ def process_xml_file(content, filename):
         tree = ET.parse(io.BytesIO(content))
         root = tree.getroot()
         
-        # Coleta rigorosa com mapeamento exaustivo para suportar o padrão SPED Nacional
+        # Mapeamento rigoroso para suportar diversos padrões (ABRASF, SPED Nacional, Municipais)
         row = {
             'Arquivo': filename,
             'Nota_Numero': get_xml_value(root, ['nNFSe', 'nDPS', 'NumeroNFe', 'nNF', 'numero', 'Numero']),
@@ -129,7 +129,7 @@ def process_xml_file(content, filename):
             'Descricao': get_xml_value(root, ['CodigoServico', 'itemServico', 'cServ', 'xDescServ', 'Discriminacao', 'xServ', 'infCpl', 'xProd'])
         }
 
-        # Lógica de Captura de ISS Retido (SPED Nacional vs ABRASF)
+        # Lógica de Captura de ISS Retido (Mapeamento explícito)
         iss_retido_flag = get_xml_value(root, ['ISSRetido']).lower()
         tp_ret_flag = get_xml_value(root, ['tpRetISSQN', 'tpRetISS'])
         v_total_ret_tag = float(get_xml_value(root, ['vTotalRet']))
@@ -138,7 +138,7 @@ def process_xml_file(content, filename):
         v_liq = float(row['Vlr_Liquido'])
         v_iss_tag = float(row['ISS_Valor'])
 
-        # Se houver flag de retenção OU se o gap bruto/líquido for maior ou igual ao ISS
+        # Se houver flag de retenção OU se a diferença Bruto/Líquido cobrir o valor do ISS
         if tp_ret_flag == '2' or iss_retido_flag == 'true' or v_total_ret_tag > 0 or (v_bruto - v_liq >= v_iss_tag and v_iss_tag > 0):
              row['Ret_ISS_Apurado'] = v_iss_tag
         else:
@@ -171,7 +171,7 @@ if uploaded_files:
             if data_rows:
                 df = pd.DataFrame(data_rows)
                 
-                # Conversão e Limpeza para Auditoria
+                # Conversão das colunas financeiras
                 cols_fin = ['Vlr_Bruto', 'Vlr_Deducao', 'BC_PIS_COFINS', 'Vlr_Liquido', 'ISS_Valor', 'Ret_ISS_Apurado', 'Ret_PIS', 'Ret_COFINS', 'Ret_CSLL', 'Ret_IRRF']
                 for col in cols_fin:
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
@@ -191,11 +191,11 @@ if uploaded_files:
                     if abs(diff_real - soma_total) <= 0.05:
                         return "✅ Ok: Impostos batem."
                     
-                    # Teste 2: Obra/Dedução (Bruto - Dedução - Retenções = Líquido)
+                    # Teste 2: Construção Civil (Bruto - Dedução - Retenções = Líquido)
                     if abs(diff_real - (v_ded + soma_total)) <= 0.05:
                         return "✅ Ok: Dedução + Impostos batem."
                     
-                    # Teste 3: Batida apenas com Dedução
+                    # Teste 3: Apenas Dedução (Bruto - Dedução = Líquido)
                     if abs(diff_real - v_ded) <= 0.05:
                         return "✅ Ok: Apenas dedução aplicada."
 
@@ -204,13 +204,14 @@ if uploaded_files:
 
                 df['Diagnostico'] = df.apply(realizar_diagnostico, axis=1)
 
-                # Reordenação de Colunas - Garantindo que nada suma
-                ordem_cols = [
-                    'Arquivo', 'Nota_Numero', 'Vlr_Bruto', 'Vlr_Deducao', 'BC_PIS_COFINS', 
-                    'Vlr_Liquido', 'ISS_Valor', 'Ret_ISS_Apurado', 'Ret_PIS', 'Ret_COFINS', 
+                # Organização de Colunas (Nenhuma coluna removida)
+                ordem_exibicao = [
+                    'Arquivo', 'Nota_Numero', 'Data_Emissao', 'Prestador_Razao', 
+                    'Vlr_Bruto', 'Vlr_Deducao', 'BC_PIS_COFINS', 'Vlr_Liquido', 
+                    'ISS_Valor', 'Ret_ISS_Apurado', 'Ret_PIS', 'Ret_COFINS', 
                     'Ret_CSLL', 'Ret_IRRF', 'Diagnostico', 'Descricao'
                 ]
-                df = df[[c for c in ordem_cols if c in df.columns]]
+                df = df[[c for c in ordem_exibicao if c in df.columns]]
 
                 # Linha de Subtotal
                 total_row = {col: "" for col in df.columns}
@@ -235,6 +236,7 @@ if uploaded_files:
                     total_fmt = workbook.add_format({'bold': True, 'bg_color': '#FFE4F2', 'num_format': '#,##0.00', 'border': 1})
                     error_fmt = workbook.add_format({'font_color': 'red', 'border': 1})
                     
+                    # Filtros automáticos
                     worksheet.autofilter(0, 0, len(df_final)-1, len(df_final.columns)-1)
                     
                     for i, col in enumerate(df_final.columns):
@@ -244,17 +246,24 @@ if uploaded_files:
                         else:
                             worksheet.set_column(i, i, 25)
                     
+                    # Formatação condicional para Erros
                     diag_idx = df_final.columns.get_loc('Diagnostico')
                     worksheet.conditional_format(1, diag_idx, len(df_final)-1, diag_idx, {
                         'type': 'text', 'criteria': 'containing', 'value': 'Erro', 'format': error_fmt
                     })
                     
+                    # Linha de total no Excel
                     for i, col in enumerate(df_final.columns):
                         val = df_final.iloc[-1][col]
                         worksheet.write(len(df_final), i, val, total_fmt)
 
-                st.download_button(label="📥 BAIXAR EXCEL AUDITADO", data=output.getvalue(), file_name="portal_tax_auditoria.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                st.download_button(
+                    label="📥 BAIXAR EXCEL AUDITADO", 
+                    data=output.getvalue(), 
+                    file_name="portal_tax_auditoria.xlsx", 
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
 
-# --- CONTROLE DE COMPORTAMENTO ---
-# Gostaria de personalizar o tom, linguagem ou formatação das futuras interações?
-# Você pode adicionar suas preferências em 'Instruções para o Gemini' aqui: https://gemini.google.com/saved-info
+# --- PRÓXIMO PASSO ---
+# Esta versão restaurou TODAS as colunas e aplicou a lógica híbrida para validar o SPED Nacional e Obra.
+# Já podemos rodar o processamento?
