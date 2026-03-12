@@ -161,22 +161,28 @@ if uploaded_files:
                 for col in cols_fin:
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
 
-                # --- LÓGICA DE DIAGNÓSTICO CORRIGIDA PARA OBRAS ---
+                # --- LÓGICA DE DIAGNÓSTICO HÍBRIDA (Obra + Comum) ---
                 def realizar_diagnostico(r):
-                    # Valor que efetivamente deve ser considerado após a dedução de materiais/obra
-                    base_pos_deducao = round(r['Vlr_Bruto'] - r['Vlr_Deducao'], 2)
+                    soma_ret = round(r['Ret_ISS'] + r['Ret_PIS'] + r['Ret_COFINS'] + r['Ret_CSLL'] + r['Ret_IRRF'], 2)
+                    v_bruto = round(r['Vlr_Bruto'], 2)
+                    v_liq = round(r['Vlr_Liquido'], 2)
+                    v_ded = round(r['Vlr_Deducao'], 2)
                     
-                    # Soma das retenções que saem do bolso do tomador
-                    soma_retencoes = round(r['Ret_ISS'] + r['Ret_PIS'] + r['Ret_COFINS'] + r['Ret_CSLL'] + r['Ret_IRRF'], 2)
+                    # Teste 1: Serviço Padrão (Bruto - Retenções = Líquido)
+                    if abs(round(v_bruto - soma_ret, 2) - v_liq) <= 0.05:
+                        return "✅ Valores batem (Serviço Padrão)."
                     
-                    # Cálculo do líquido esperado: (Bruto - Dedução) - Retenções
-                    liquido_esperado = round(base_pos_deducao - soma_retencoes, 2)
+                    # Teste 2: Construção Civil (Bruto - Dedução - Retenções = Líquido)
+                    if abs(round(v_bruto - v_ded - soma_ret, 2) - v_liq) <= 0.05:
+                        return "✅ Valores batem (Construção Civil)."
                     
-                    if abs(liquido_esperado - r['Vlr_Liquido']) <= 0.05:
-                        return "✅ Valores batem perfeitamente."
-                    else:
-                        gap = round(liquido_esperado - r['Vlr_Liquido'], 2)
-                        return f"❌ Erro: Discrepância de R$ {gap}"
+                    # Teste 3: Apenas Dedução (Bruto - Dedução = Líquido)
+                    if abs(round(v_bruto - v_ded, 2) - v_liq) <= 0.05:
+                        return "✅ Valores batem (Dedução aplicada)."
+
+                    # Se nada bater, calcula a discrepância com base no cenário mais provável
+                    gap = round(v_bruto - v_ded - soma_ret - v_liq, 2)
+                    return f"❌ Erro: Discrepância de R$ {gap}"
 
                 df['Diagnostico'] = df.apply(realizar_diagnostico, axis=1)
 
@@ -244,5 +250,5 @@ if uploaded_files:
                 )
 
 # --- PRÓXIMO PASSO ---
-# A lógica de diagnóstico foi simplificada para: (Bruto - Dedução) - Retenções = Líquido.
-# Isso deve zerar a discrepância nas notas de obra. Deseja rodar o teste agora?
+# Esta versão testa 3 cenários diferentes antes de acusar erro. 
+# Isso deve resolver o problema das notas comuns e da nota de obra simultaneamente. Gostaria de testar?
