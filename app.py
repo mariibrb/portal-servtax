@@ -89,7 +89,7 @@ def get_xml_value(root, tags):
             element = root.find(f".//{tag}")
         if element is not None and element.text:
             return element.text.strip()
-    return "0.00" if any(x in str(tags).lower() for x in ['vlr', 'valor', 'iss', 'pis', 'cofins', 'ir', 'csll', 'liquido', 'trib']) else ""
+    return "0.00" if any(x in str(tags).lower() for x in ['vlr', 'valor', 'iss', 'pis', 'cofins', 'ir', 'csll', 'liquido', 'trib', 'dedu', 'dr']) else ""
 
 def process_xml_file(content, filename):
     try:
@@ -98,7 +98,6 @@ def process_xml_file(content, filename):
         iss_retido_flag = get_xml_value(root, ['ISSRetido']).lower()
         tp_ret_flag = get_xml_value(root, ['tpRetISSQN'])
         
-        # AJUSTE FINO: Lendo a flag de instrução federal (1=Retido, 2=Prestador paga)
         tp_ret_fed = get_xml_value(root, ['tpRetPisCofins'])
         
         row = {
@@ -113,7 +112,9 @@ def process_xml_file(content, filename):
             'Vlr_Liquido': get_xml_value(root, ['vLiq', 'ValorLiquidoNFe', 'vLiqNFSe', 'vLiquido', 'vServPrest/vLiq']),
             'ISS_Valor': get_xml_value(root, ['vISS', 'ValorISS', 'vISSQN', 'iss/vISS']),
             
-            # AJUSTE CIRÚRGICO: Só captura valor se o XML confirmar que é retenção (tpRetPisCofins == 1)
+            # Captura de Deduções (Ajuste para Construção Civil)
+            'Vlr_Deducao': get_xml_value(root, ['vDR', 'vDedRed', 'vDeducoes', 'ValorDeducoes']),
+            
             'Ret_PIS': get_xml_value(root, ['vPIS', 'vPis', 'ValorPIS', 'vPIS_Ret', 'PISRetido', 'vRetPIS']) if tp_ret_fed == '1' else "0.00",
             'Ret_COFINS': get_xml_value(root, ['vCOFINS', 'vCofins', 'ValorCOFINS', 'vCOFINS_Ret', 'COFINSRetido', 'vRetCOFINS']) if tp_ret_fed == '1' else "0.00",
             
@@ -158,7 +159,7 @@ with col2:
             <li><b>Leitura Universal:</b> Dados de centenas de prefeituras consolidados.</li>
             <li><b>Gestão de ISS:</b> Separação entre ISS Próprio e Retido.</li>
             <li><b>Impostos Federais:</b> Captura de PIS, COFINS, CSLL e IRRF.</li>
-            <li><b>Diagnóstico:</b> Identificação de notas com retenções pendentes.</li>
+            <li><b>Deduções:</b> Agora captura abatimentos de base de cálculo (Construção Civil).</li>
         </ul>
     </div>
     """, unsafe_allow_html=True)
@@ -184,19 +185,20 @@ if uploaded_files:
 
             if data_rows:
                 df = pd.DataFrame(data_rows)
-                cols_fin = ['Vlr_Bruto', 'Vlr_Liquido', 'ISS_Valor', 'Ret_ISS', 'Ret_PIS', 'Ret_COFINS', 'Ret_CSLL', 'Ret_IRRF']
+                cols_fin = ['Vlr_Bruto', 'Vlr_Liquido', 'Vlr_Deducao', 'ISS_Valor', 'Ret_ISS', 'Ret_PIS', 'Ret_COFINS', 'Ret_CSLL', 'Ret_IRRF']
                 for col in cols_fin:
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
 
-                # --- DIAGNÓSTICO ---
+                # --- DIAGNÓSTICO (Ajustado para considerar deduções) ---
                 def definir_diagnostico(r):
                     diff = round(r['Vlr_Bruto'] - r['Vlr_Liquido'], 2)
-                    soma_retencoes = round(r['Ret_ISS'] + r['Ret_PIS'] + r['Ret_COFINS'] + r['Ret_CSLL'] + r['Ret_IRRF'], 2)
+                    # A diferença entre bruto e líquido deve ser igual à soma de Retenções + Deduções
+                    soma_abatimentos = round(r['Ret_ISS'] + r['Ret_PIS'] + r['Ret_COFINS'] + r['Ret_CSLL'] + r['Ret_IRRF'] + r['Vlr_Deducao'], 2)
                     
-                    if abs(diff - soma_retencoes) <= 0.01:
+                    if abs(diff - soma_abatimentos) <= 0.01:
                         return "✅"
                     else:
-                        return f"⚠️ Divergência: R$ {round(diff - soma_retencoes, 2)} (Diferença Líquida vs Retenções)"
+                        return f"⚠️ Divergência: R$ {round(diff - soma_abatimentos, 2)} (Diferença Líquida vs Abatimentos)"
 
                 df['Diagnostico'] = df.apply(definir_diagnostico, axis=1)
 
