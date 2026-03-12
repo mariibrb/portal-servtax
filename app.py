@@ -102,27 +102,30 @@ def process_xml_file(content, filename):
         tree = ET.parse(io.BytesIO(content))
         root = tree.getroot()
         
-        # RESTAURAÇÃO DO MAPEAMENTO COMPLETO
+        # RESTAURAÇÃO DO MAPEAMENTO COMPLETO E EXAUSTIVO
         row = {
             'Arquivo': filename,
             'Nota_Numero': get_xml_value(root, ['nNFSe', 'nDPS', 'NumeroNFe', 'nNF', 'numero', 'Numero']),
             'Data_Emissao': get_xml_value(root, ['dhProc', 'dhEmi', 'DataEmissaoNFe', 'DataEmissao', 'dtEmi']),
-            'Prestador_Razao': get_xml_value(root, ['emit/xNome', 'RazaoSocialPrestador', 'xNomePrestador', 'xNome']),
+            'Prestador_Razao': get_xml_value(root, ['emit/xNome', 'RazaoSocialPrestador', 'xNomePrestador', 'emit_xNome', 'RazaoSocial', 'xNome']),
+            'Prestador_CNPJ': get_xml_value(root, ['emit/CNPJ', 'CPFCNPJPrestador/CNPJ', 'CNPJPrestador', 'emit_CNPJ', 'CPFCNPJPrestador/CPF', 'CNPJ']),
+            'Tomador_Razao': get_xml_value(root, ['toma/xNome', 'RazaoSocialTomador', 'dest/xNome', 'xNomeTomador', 'RazaoSocialTomador', 'tom/xNome', 'xNome']),
+            'Tomador_CNPJ': get_xml_value(root, ['toma/CNPJ', 'CPFCNPJTomador/CNPJ', 'CPFCNPJTomador/CPF', 'dest/CNPJ', 'CNPJTomador', 'toma/CPF', 'tom/CNPJ', 'CNPJ']),
             
-            # VALORES BASE (RESTAURADOS)
+            # VALORES BASE
             'Vlr_Bruto': get_xml_value(root, ['vServ', 'vServPrest/vServ', 'ValorServicos', 'vNF', 'ValorTotal']),
             'Vlr_Deducao': get_xml_value(root, ['vDedRed', 'vDR', 'vDeducao', 'ValorDeducao']),
             'BC_PIS_COFINS': get_xml_value(root, ['vBCPisCofins', 'vBCPISCOFINS', 'vBCPIS', 'vBCCOFINS']),
             'Vlr_Liquido': get_xml_value(root, ['vLiq', 'vLiquido', 'ValorLiquidoNFe', 'vLiqNFSe', 'vServPrest/vLiq']),
             
-            # IMPOSTOS (RESTAURADOS)
+            # IMPOSTOS
             'ISS_Valor': get_xml_value(root, ['vISSQN', 'vISS', 'ValorISS', 'iss/vISS']),
             'Ret_PIS': get_xml_value(root, ['vPis', 'vPIS', 'vRetPIS', 'ValorPIS', 'vPIS_Ret']),
             'Ret_COFINS': get_xml_value(root, ['vCofins', 'vCOFINS', 'vRetCOFINS', 'ValorCOFINS', 'vCOFINS_Ret']),
             'Ret_CSLL': get_xml_value(root, ['vRetCSLL', 'vCSLL', 'ValorCSLL', 'vCSLL_Ret']),
             'Ret_IRRF': get_xml_value(root, ['vRetIRRF', 'vIRRF', 'vIR', 'ValorIR', 'vIR_Ret']),
             
-            'Descricao': get_xml_value(root, ['CodigoServico', 'xDescServ', 'Discriminacao', 'xServ', 'infCpl'])
+            'Descricao': get_xml_value(root, ['CodigoServico', 'itemServico', 'cServ', 'xDescServ', 'Discriminacao', 'xServ', 'infCpl', 'xProd'])
         }
 
         # Lógica de Captura de ISS Retido (SPED Nacional + ABRASF)
@@ -195,11 +198,11 @@ if uploaded_files:
 
                 df['Diagnostico'] = df.apply(realizar_diagnostico, axis=1)
 
-                # Organização de Colunas (Nenhuma coluna esquecida)
+                # Organização de Colunas (RESTABELECIDA)
                 ordem_cols = [
-                    'Arquivo', 'Nota_Numero', 'Data_Emissao', 'Prestador_Razao', 
-                    'Vlr_Bruto', 'Vlr_Deducao', 'BC_PIS_COFINS', 'Vlr_Liquido', 
-                    'ISS_Valor', 'Ret_ISS_Apurado', 'Ret_PIS', 'Ret_COFINS', 
+                    'Arquivo', 'Nota_Numero', 'Data_Emissao', 'Prestador_Razao', 'Prestador_CNPJ',
+                    'Tomador_Razao', 'Tomador_CNPJ', 'Vlr_Bruto', 'Vlr_Deducao', 'BC_PIS_COFINS', 
+                    'Vlr_Liquido', 'ISS_Valor', 'Ret_ISS_Apurado', 'Ret_PIS', 'Ret_COFINS', 
                     'Ret_CSLL', 'Ret_IRRF', 'Diagnostico', 'Descricao'
                 ]
                 df = df[[c for c in ordem_cols if c in df.columns]]
@@ -247,5 +250,5 @@ if uploaded_files:
                 st.download_button(label="📥 BAIXAR EXCEL AUDITADO", data=output.getvalue(), file_name="portal_tax_auditoria.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 # --- PRÓXIMO PASSO ---
-# Rode o código agora. Ele recuperou a busca profunda e as 16 colunas de controle. 
-# Deve processar todas as notas e dar o "Ok" tanto nas comuns quanto na de obra.
+# Verifique se o processamento das notas agora abrange o volume total esperado. 
+# Gostaria que eu incluísse alguma coluna adicional de identificação fiscal para facilitar a sua conciliação bancária?
