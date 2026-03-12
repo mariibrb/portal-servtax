@@ -98,6 +98,9 @@ def process_xml_file(content, filename):
         iss_retido_flag = get_xml_value(root, ['ISSRetido']).lower()
         tp_ret_flag = get_xml_value(root, ['tpRetISSQN'])
         
+        # AJUSTE FINO: Lendo a flag de instrução federal (1=Retido, 2=Prestador paga)
+        tp_ret_fed = get_xml_value(root, ['tpRetPisCofins'])
+        
         row = {
             'Arquivo': filename,
             'Nota_Numero': get_xml_value(root, ['nNFSe', 'NumeroNFe', 'nNF', 'numero', 'Numero']),
@@ -109,8 +112,11 @@ def process_xml_file(content, filename):
             'Vlr_Bruto': get_xml_value(root, ['vServ', 'ValorServicos', 'vNF', 'vServPrest/vServ', 'ValorTotal', 'vServPrest']),
             'Vlr_Liquido': get_xml_value(root, ['vLiq', 'ValorLiquidoNFe', 'vLiqNFSe', 'vLiquido', 'vServPrest/vLiq']),
             'ISS_Valor': get_xml_value(root, ['vISS', 'ValorISS', 'vISSQN', 'iss/vISS']),
-            'Ret_PIS': get_xml_value(root, ['vPIS', 'ValorPIS', 'vPIS_Ret', 'PISRetido', 'vRetPIS']),
-            'Ret_COFINS': get_xml_value(root, ['vCOFINS', 'ValorCOFINS', 'vCOFINS_Ret', 'COFINSRetido', 'vRetCOFINS']),
+            
+            # AJUSTE CIRÚRGICO: Só captura valor se o XML confirmar que é retenção (tpRetPisCofins == 1)
+            'Ret_PIS': get_xml_value(root, ['vPIS', 'vPis', 'ValorPIS', 'vPIS_Ret', 'PISRetido', 'vRetPIS']) if tp_ret_fed == '1' else "0.00",
+            'Ret_COFINS': get_xml_value(root, ['vCOFINS', 'vCofins', 'ValorCOFINS', 'vCOFINS_Ret', 'COFINSRetido', 'vRetCOFINS']) if tp_ret_fed == '1' else "0.00",
+            
             'Ret_CSLL': get_xml_value(root, ['vCSLL', 'ValorCSLL', 'vCSLL_Ret', 'CSLLRetido', 'vRetCSLL', 'vRetCSLL']),
             'Ret_IRRF': get_xml_value(root, ['vRetIRRF', 'vIR', 'ValorIR', 'vIR_Ret', 'IRRetido', 'vRetIR', 'vIRRF', 'vRetIRRF']),
             'Descricao': get_xml_value(root, ['CodigoServico', 'itemServico', 'cServ', 'xDescServ', 'Discriminacao', 'xServ', 'infCpl', 'xProd'])
@@ -182,7 +188,7 @@ if uploaded_files:
                 for col in cols_fin:
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
 
-                # --- AJUSTE SOLICITADO NO DIAGNÓSTICO ---
+                # --- DIAGNÓSTICO ---
                 def definir_diagnostico(r):
                     diff = round(r['Vlr_Bruto'] - r['Vlr_Liquido'], 2)
                     soma_retencoes = round(r['Ret_ISS'] + r['Ret_PIS'] + r['Ret_COFINS'] + r['Ret_CSLL'] + r['Ret_IRRF'], 2)
