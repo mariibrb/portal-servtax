@@ -111,8 +111,10 @@ def process_xml_file(content, filename):
             'Vlr_Liquido': get_xml_value(root, ['vLiq', 'ValorLiquidoNFe', 'vLiqNFSe', 'vLiquido', 'vServPrest/vLiq']),
             'ISS_Valor': get_xml_value(root, ['vISS', 'ValorISS', 'vISSQN', 'iss/vISS']),
             'Vlr_Deducao': get_xml_value(root, ['vDR', 'vDedRed', 'vDeducoes', 'ValorDeducoes']),
+            
             'Ret_PIS': get_xml_value(root, ['vPIS', 'vPis', 'ValorPIS', 'vPIS_Ret', 'PISRetido', 'vRetPIS']) if tp_ret_fed == '1' else "0.00",
             'Ret_COFINS': get_xml_value(root, ['vCOFINS', 'vCofins', 'ValorCOFINS', 'vCOFINS_Ret', 'COFINSRetido', 'vRetCOFINS']) if tp_ret_fed == '1' else "0.00",
+            
             'Ret_CSLL': get_xml_value(root, ['vCSLL', 'ValorCSLL', 'vCSLL_Ret', 'CSLLRetido', 'vRetCSLL', 'vRetCSLL']),
             'Ret_IRRF': get_xml_value(root, ['vRetIRRF', 'vIR', 'ValorIR', 'vIR_Ret', 'IRRetido', 'vRetIR', 'vIRRF', 'vRetIRRF']),
             'Descricao': get_xml_value(root, ['CodigoServico', 'itemServico', 'cServ', 'xDescServ', 'Discriminacao', 'xServ', 'infCpl', 'xProd'])
@@ -135,7 +137,7 @@ col1, col2 = st.columns(2)
 with col1:
     st.markdown('<div class="instrucoes-card"><h3>📖 Passo a Passo</h3><ol><li><b>Upload:</b> Arraste arquivos <b>.XML</b> ou <b>.ZIP</b> abaixo.</li><li><b>Ação:</b> Clique em <b>"INICIAR AUDITORIA"</b>.</li><li><b>Conferência:</b> Analise o <b>Diagnóstico</b> de divergências.</li><li><b>Saída:</b> Baixe o Excel final para auditoria.</li></ol></div>', unsafe_allow_html=True)
 with col2:
-    st.markdown('<div class="instrucoes-card"><h3>📊 O que será obtido?</h3><ul><li><b>Totais Dinâmicos:</b> Linha 1 com Subtotal para filtros.</li><li><b>Construção Civil:</b> Diagnóstico correto considerando deduções.</li><li><b>Persistência:</b> Sem reprocessar dados após o download.</li></ul></div>', unsafe_allow_html=True)
+    st.markdown('<div class="instrucoes-card"><h3>📊 O que será obtido?</h3><ul><li><b>Persistência:</b> Download sem reiniciar.</li><li><b>Subtotal:</b> Linha 1 do Excel dinâmica.</li><li><b>Fiscal:</b> Captura de deduções e retenções correta.</li></ul></div>', unsafe_allow_html=True)
 
 st.markdown("---")
 
@@ -188,8 +190,8 @@ if st.session_state.df_final is not None:
 
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        start_row = 15 # Respiro visual
-        df.to_excel(writer, index=False, sheet_name='Auditoria', startrow=start_row)
+        # Começa na linha 3 para deixar Linha 1 para Subtotal e Linha 2 para Título
+        df.to_excel(writer, index=False, sheet_name='Auditoria', startrow=2, header=False)
         
         workbook = writer.book
         worksheet = writer.sheets['Auditoria']
@@ -202,26 +204,20 @@ if st.session_state.df_final is not None:
         cols_fin_indices = ['Vlr_Bruto', 'Vlr_Liquido', 'Vlr_Deducao', 'ISS_Valor', 'Ret_ISS', 'Ret_PIS', 'Ret_COFINS', 'Ret_CSLL', 'Ret_IRRF']
         
         for i, col in enumerate(df.columns):
-            # Títulos na Linha 16
-            worksheet.write(start_row, i, col, header_fmt)
+            # Escreve os títulos no padrão rosa na linha 2
+            worksheet.write(1, i, col, header_fmt)
             
-            # Subtotal na Linha 1
+            # Se for coluna financeira, aplica o SUBTOTAL na linha 1
             if col in cols_fin_indices:
                 col_letter = chr(65 + i) if i < 26 else f"{chr(64 + i//26)}{chr(65 + i%26)}"
-                formula = f"=SUBTOTAL(9,{col_letter}{start_row+2}:{col_letter}{start_row + len(df) + 1})"
+                # Fórmula SUBTOTAL(9;...) que ignora linhas ocultas por filtro
+                formula = f"=SUBTOTAL(9,{col_letter}4:{col_letter}{len(df)+1000})"
                 worksheet.write(0, i, formula, subtotal_fmt)
-                worksheet.write(1, i, f"Total {col}", workbook.add_format({'italic': True, 'font_size': 8}))
                 worksheet.set_column(i, i, 18, num_fmt)
             elif col == 'Diagnostico':
                 worksheet.set_column(i, i, 40)
             else:
                 worksheet.set_column(i, i, 22)
-
-        # Adicionar Tabela Oficial para Filtros de Linha
-        worksheet.add_table(start_row, 0, start_row + len(df), len(df.columns) - 1, {
-            'columns': [{'header': c} for c in df.columns],
-            'style': 'TableStyleMedium 1'
-        })
 
     st.download_button(
         label="📥 BAIXAR EXCEL AJUSTADO",
