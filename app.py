@@ -98,7 +98,6 @@ def process_xml_file(content, filename):
         iss_retido_flag = get_xml_value(root, ['ISSRetido']).lower()
         tp_ret_flag = get_xml_value(root, ['tpRetISSQN'])
         
-        # AJUSTE FINO: Lendo a flag de instrução federal (1=Retido, 2=Prestador paga)
         tp_ret_fed = get_xml_value(root, ['tpRetPisCofins'])
         
         row = {
@@ -113,7 +112,6 @@ def process_xml_file(content, filename):
             'Vlr_Liquido': get_xml_value(root, ['vLiq', 'ValorLiquidoNFe', 'vLiqNFSe', 'vLiquido', 'vServPrest/vLiq']),
             'ISS_Valor': get_xml_value(root, ['vISS', 'ValorISS', 'vISSQN', 'iss/vISS']),
             
-            # AJUSTE CIRÚRGICO: Só captura valor se o XML confirmar que é retenção (tpRetPisCofins == 1)
             'Ret_PIS': get_xml_value(root, ['vPIS', 'vPis', 'ValorPIS', 'vPIS_Ret', 'PISRetido', 'vRetPIS']) if tp_ret_fed == '1' else "0.00",
             'Ret_COFINS': get_xml_value(root, ['vCOFINS', 'vCofins', 'ValorCOFINS', 'vCOFINS_Ret', 'COFINSRetido', 'vRetCOFINS']) if tp_ret_fed == '1' else "0.00",
             
@@ -136,36 +134,18 @@ def process_xml_file(content, filename):
 st.title("PORTAL TAX NFS-e - AUDITORIA FISCAL")
 
 col1, col2 = st.columns(2)
-
 with col1:
-    st.markdown("""
-    <div class="instrucoes-card">
-        <h3>📖 Passo a Passo</h3>
-        <ol>
-            <li><b>Upload:</b> Arraste arquivos <b>.XML</b> ou <b>.ZIP</b> abaixo.</li>
-            <li><b>Ação:</b> Clique em <b>"INICIAR AUDITORIA"</b>.</li>
-            <li><b>Conferência:</b> Analise o <b>Diagnóstico</b> de divergências.</li>
-            <li><b>Saída:</b> Baixe o Excel final para auditoria.</li>
-        </ol>
-    </div>
-    """, unsafe_allow_html=True)
-
+    st.markdown("""<div class="instrucoes-card"><h3>📖 Passo a Passo</h3><ol><li><b>Upload:</b> Arraste arquivos <b>.XML</b> ou <b>.ZIP</b> abaixo.</li><li><b>Ação:</b> Clique em <b>"INICIAR AUDITORIA"</b>.</li><li><b>Conferência:</b> Analise o <b>Diagnóstico</b> de divergências.</li><li><b>Saída:</b> Baixe o Excel final para auditoria.</li></ol></div>""", unsafe_allow_html=True)
 with col2:
-    st.markdown("""
-    <div class="instrucoes-card">
-        <h3>📊 O que será obtido?</h3>
-        <ul>
-            <li><b>Leitura Universal:</b> Dados de centenas de prefeituras consolidados.</li>
-            <li><b>Gestão de ISS:</b> Separação entre ISS Próprio e Retido.</li>
-            <li><b>Impostos Federais:</b> Captura de PIS, COFINS, CSLL e IRRF.</li>
-            <li><b>Diagnóstico:</b> Identificação de notas com retenções pendentes.</li>
-        </ul>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown("""<div class="instrucoes-card"><h3>📊 O que será obtido?</h3><ul><li><b>Leitura Universal:</b> Dados consolidados.</li><li><b>Gestão de ISS:</b> Separação entre ISS Próprio e Retido.</li><li><b>Impostos Federais:</b> Captura de PIS, COFINS, CSLL e IRRF.</li><li><b>Diagnóstico:</b> Identificação de notas com retenções pendentes.</li></ul></div>""", unsafe_allow_html=True)
 
 st.markdown("---")
 
 uploaded_files = st.file_uploader("Arraste os arquivos XML ou ZIP aqui", type=["xml", "zip"], accept_multiple_files=True)
+
+# LÓGICA DE PERSISTÊNCIA (SESSION STATE)
+if 'df_final' not in st.session_state:
+    st.session_state.df_final = None
 
 if uploaded_files:
     if st.button("🚀 INICIAR AUDITORIA FISCAL"):
@@ -188,15 +168,10 @@ if uploaded_files:
                 for col in cols_fin:
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
 
-                # --- DIAGNÓSTICO ---
                 def definir_diagnostico(r):
                     diff = round(r['Vlr_Bruto'] - r['Vlr_Liquido'], 2)
                     soma_retencoes = round(r['Ret_ISS'] + r['Ret_PIS'] + r['Ret_COFINS'] + r['Ret_CSLL'] + r['Ret_IRRF'], 2)
-                    
-                    if abs(diff - soma_retencoes) <= 0.01:
-                        return "✅"
-                    else:
-                        return f"⚠️ Divergência: R$ {round(diff - soma_retencoes, 2)} (Diferença Líquida vs Retenções)"
+                    return "✅" if abs(diff - soma_retencoes) <= 0.01 else f"⚠️ Divergência: R$ {round(diff - soma_retencoes, 2)}"
 
                 df['Diagnostico'] = df.apply(definir_diagnostico, axis=1)
 
@@ -204,28 +179,55 @@ if uploaded_files:
                 if 'Ret_ISS' in cols and 'ISS_Valor' in cols:
                     cols.insert(cols.index('ISS_Valor') + 1, cols.pop(cols.index('Ret_ISS')))
                     df = df[cols]
+                
+                st.session_state.df_final = df
 
-                st.success(f"✅ {len(df)} notas processadas!")
-                st.dataframe(df)
+if st.session_state.df_final is not None:
+    df = st.session_state.df_final
+    st.success(f"✅ {len(df)} notas processadas!")
+    st.dataframe(df)
 
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                    df.to_excel(writer, index=False, sheet_name='PortalServTax')
-                    workbook = writer.book
-                    worksheet = writer.sheets['PortalServTax']
-                    header_fmt = workbook.add_format({'bold': True, 'bg_color': '#FF69B4', 'font_color': 'white', 'border': 1})
-                    num_fmt = workbook.add_format({'num_format': '#,##0.00'})
-                    
-                    for i, col in enumerate(df.columns):
-                        worksheet.write(0, i, col, header_fmt)
-                        if col in cols_fin:
-                            worksheet.set_column(i, i, 18, num_fmt)
-                        else:
-                            worksheet.set_column(i, i, 22)
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        start_row = 15 # Espaço de respiro solicitado
+        df.to_excel(writer, index=False, sheet_name='PortalServTax', startrow=start_row)
+        
+        workbook = writer.book
+        worksheet = writer.sheets['PortalServTax']
+        
+        # Formatações
+        header_fmt = workbook.add_format({'bold': True, 'bg_color': '#FF69B4', 'font_color': 'white', 'border': 1, 'align': 'center'})
+        subtotal_fmt = workbook.add_format({'bold': True, 'bg_color': '#F8F9FA', 'font_color': '#333333', 'border': 1, 'num_format': '#,##0.00'})
+        num_fmt = workbook.add_format({'num_format': '#,##0.00'})
+        
+        cols_fin = ['Vlr_Bruto', 'Vlr_Liquido', 'ISS_Valor', 'Ret_ISS', 'Ret_PIS', 'Ret_COFINS', 'Ret_CSLL', 'Ret_IRRF']
+        
+        for i, col in enumerate(df.columns):
+            # Títulos na linha 16 (Índice start_row)
+            worksheet.write(start_row, i, col, header_fmt)
+            
+            # Subtotal na Linha 1 (Índice 0)
+            if col in cols_fin:
+                col_letter = chr(65 + i) if i < 26 else f"{chr(64 + i//26)}{chr(65 + i%26)}"
+                formula = f"=SUBTOTAL(9,{col_letter}{start_row+2}:{col_letter}{start_row + len(df) + 1})"
+                worksheet.write(0, i, formula, subtotal_fmt)
+                worksheet.write(1, i, f"Σ {col}", workbook.add_format({'italic': True, 'font_size': 9}))
+                worksheet.set_column(i, i, 18, num_fmt)
+            elif col == 'Diagnostico':
+                worksheet.set_column(i, i, 40)
+            else:
+                worksheet.set_column(i, i, 22)
 
-                st.download_button(
-                    label="📥 BAIXAR EXCEL AJUSTADO",
-                    data=output.getvalue(),
-                    file_name="portal_servtax_auditoria.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
+        # Adicionar Filtros e Formatar como Tabela Oficial
+        worksheet.add_table(start_row, 0, start_row + len(df), len(df.columns) - 1, {
+            'columns': [{'header': c} for c in df.columns],
+            'style': 'TableStyleMedium 1',
+            'name': 'TabelaAuditoria'
+        })
+
+    st.download_button(
+        label="📥 BAIXAR EXCEL AJUSTADO",
+        data=output.getvalue(),
+        file_name="portal_servtax_auditoria.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
