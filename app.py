@@ -182,7 +182,17 @@ if uploaded_files:
                 for col in cols_fin:
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
 
-                df['Diagnostico'] = df.apply(lambda r: "⚠️ Divergência!" if abs(r['Vlr_Bruto'] - r['Vlr_Liquido']) > 0.01 else "✅", axis=1)
+                # --- AJUSTE SOLICITADO NO DIAGNÓSTICO ---
+                def definir_diagnostico(r):
+                    diff = round(r['Vlr_Bruto'] - r['Vlr_Liquido'], 2)
+                    soma_retencoes = round(r['Ret_ISS'] + r['Ret_PIS'] + r['Ret_COFINS'] + r['Ret_CSLL'] + r['Ret_IRRF'], 2)
+                    
+                    if abs(diff - soma_retencoes) <= 0.01:
+                        return "✅"
+                    else:
+                        return f"⚠️ Divergência: R$ {round(diff - soma_retencoes, 2)} (Diferença Líquida vs Retenções)"
+
+                df['Diagnostico'] = df.apply(definir_diagnostico, axis=1)
 
                 cols = list(df.columns)
                 if 'Ret_ISS' in cols and 'ISS_Valor' in cols:
