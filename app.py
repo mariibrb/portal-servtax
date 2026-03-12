@@ -124,12 +124,11 @@ def process_xml_file(content, filename):
             'Descricao': get_xml_value(root, ['CodigoServico', 'itemServico', 'cServ', 'xDescServ', 'Discriminacao', 'xServ', 'infCpl', 'xProd'])
         }
 
+        # Lógica rigorosa de ISS Retido
         if tp_ret_flag == '2' or iss_retido_flag == 'true':
              row['Ret_ISS'] = get_xml_value(root, ['vTotTribMun', 'vISSRetido', 'ValorISS_Retido', 'vRetISS', 'vISSRet', 'iss/vRet'])
-        elif iss_retido_flag == 'false' or tp_ret_flag == '1':
-             row['Ret_ISS'] = "0.00"
         else:
-             row['Ret_ISS'] = get_xml_value(root, ['vTotTribMun', 'vISSRetido', 'ValorISS_Retido', 'vRetISS', 'vISSRet', 'iss/vRet'])
+             row['Ret_ISS'] = "0.00"
              
         return row
     except:
@@ -147,7 +146,7 @@ with col1:
         <ol>
             <li><b>Upload:</b> Arraste arquivos <b>.XML</b> ou <b>.ZIP</b> abaixo.</li>
             <li><b>Ação:</b> Clique em <b>"INICIAR AUDITORIA"</b>.</li>
-            <li><b>Conferência:</b> Veja os Totais e o Diagnóstico em Vermelho (erros).</li>
+            <li><b>Conferência:</b> Veja os Totais e o Diagnóstico inteligente.</li>
             <li><b>Saída:</b> Baixe o Excel com Filtros e Subtotais.</li>
         </ol>
     </div>
@@ -156,12 +155,12 @@ with col1:
 with col2:
     st.markdown("""
     <div class="instrucoes-card">
-        <h3>📊 Gestão e Auditoria</h3>
+        <h3>📊 Inteligência de Auditoria</h3>
         <ul>
+            <li><b>Detecção de Retenção:</b> Diferencia imposto informativo de imposto retido.</li>
             <li><b>Subtotais:</b> Soma automática de todos os valores financeiros.</li>
-            <li><b>Filtros:</b> Arquivo Excel já vem com filtros habilitados.</li>
-            <li><b>Destaque de Erro:</b> Divergências aparecem em vermelho no Excel.</li>
-            <li><b>Prova Real:</b> Diagnóstico: Bruto - Dedução - Retenções = Líquido.</li>
+            <li><b>Filtros:</b> Arquivo Excel com filtros e formatação condicional.</li>
+            <li><b>Prova Real:</b> Diagnóstico ajustado para notas com ou sem retenções.</li>
         </ul>
     </div>
     """, unsafe_allow_html=True)
@@ -191,16 +190,22 @@ if uploaded_files:
                 for col in cols_fin:
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
 
-                # --- LÓGICA DE DIAGNÓSTICO ---
+                # --- LÓGICA DE DIAGNÓSTICO INTELIGENTE ---
                 def realizar_diagnostico(r):
-                    soma_retencoes = r['Ret_ISS'] + r['Ret_PIS'] + r['Ret_COFINS'] + r['Ret_CSLL'] + r['Ret_IRRF']
-                    diferenca_apurada = round(r['Vlr_Bruto'] - r['Vlr_Deducao'] - r['Vlr_Liquido'], 2)
-                    soma_retencoes = round(soma_retencoes, 2)
+                    # Diferença real entre o que deveria ser pago e o que foi pago
+                    diferenca_real = round(r['Vlr_Bruto'] - r['Vlr_Deducao'] - r['Vlr_Liquido'], 2)
                     
-                    if abs(diferenca_apurada - soma_retencoes) <= 0.05:
-                        return "✅ Valores batem perfeitamente."
+                    # Se não há diferença, a nota está correta (sem retenções)
+                    if abs(diferenca_real) <= 0.05:
+                        return "✅ Valores batem (Sem retenções)."
+                    
+                    # Se há diferença, verificamos se ela coincide com a soma das retenções capturadas
+                    soma_retencoes = round(r['Ret_ISS'] + r['Ret_PIS'] + r['Ret_COFINS'] + r['Ret_CSLL'] + r['Ret_IRRF'], 2)
+                    
+                    if abs(diferenca_real - soma_retencoes) <= 0.05:
+                        return "✅ Valores batem com as retenções."
                     else:
-                        gap = round(diferenca_apurada - soma_retencoes, 2)
+                        gap = round(diferenca_real - soma_retencoes, 2)
                         return f"❌ Erro: Discrepância de R$ {gap}"
 
                 df['Diagnostico'] = df.apply(realizar_diagnostico, axis=1)
@@ -232,14 +237,12 @@ if uploaded_files:
                     workbook = writer.book
                     worksheet = writer.sheets['PortalServTax']
                     
-                    # Estilos
                     header_fmt = workbook.add_format({'bold': True, 'bg_color': '#FF69B4', 'font_color': 'white', 'border': 1})
                     num_fmt = workbook.add_format({'num_format': '#,##0.00', 'border': 1})
                     text_fmt = workbook.add_format({'border': 1})
                     total_fmt = workbook.add_format({'bold': True, 'bg_color': '#FFE4F2', 'num_format': '#,##0.00', 'border': 1})
                     error_txt_fmt = workbook.add_format({'font_color': 'red', 'border': 1})
                     
-                    # Colunas e Filtro
                     num_rows = len(df_with_total)
                     num_cols = len(df_with_total.columns)
                     worksheet.autofilter(0, 0, num_rows - 1, num_cols - 1)
@@ -251,7 +254,6 @@ if uploaded_files:
                         else:
                             worksheet.set_column(i, i, 25, text_fmt)
                     
-                    # Formatação Condicional de Erro na coluna Diagnostico
                     diag_col_idx = df_with_total.columns.get_loc('Diagnostico')
                     worksheet.conditional_format(1, diag_col_idx, num_rows - 1, diag_col_idx, {
                         'type':     'text',
@@ -260,7 +262,6 @@ if uploaded_files:
                         'format':   error_txt_fmt
                     })
                     
-                    # Escrita da linha de total
                     for i, col in enumerate(df_with_total.columns):
                         val = df_with_total.iloc[-1][col]
                         worksheet.write(num_rows, i, val, total_fmt)
@@ -273,5 +274,5 @@ if uploaded_files:
                 )
 
 # --- PRÓXIMO PASSO ---
-# O código está completo com: Captura Universal, Deduções, BC PIS/COFINS, Subtotais, Filtros e Alerta de Erro em Vermelho.
-# Gostaria de realizar algum outro teste com um XML específico ou essa versão atende à sua demanda?
+# Esta versão agora valida primeiro se o Bruto é igual ao Líquido. Se for, ela ignora os impostos informativos.
+# Deseja testar com as notas que estavam dando erro para confirmarmos a correção?
