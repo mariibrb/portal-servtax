@@ -136,8 +136,6 @@ def process_xml_file(content, filename):
 # --- ÁREA VISUAL ---
 st.title("PORTAL TAX NFS-e - AUDITORIA FISCAL")
 
-st.markdown("---")
-
 uploaded_files = st.file_uploader("Arraste os arquivos XML ou ZIP aqui", type=["xml", "zip"], accept_multiple_files=True)
 
 if uploaded_files:
@@ -161,28 +159,21 @@ if uploaded_files:
                 for col in cols_fin:
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
 
-                # --- LÓGICA DE DIAGNÓSTICO HÍBRIDA (Obra + Comum) ---
+                # --- LÓGICA DE DIAGNÓSTICO RÍGIDA ---
                 def realizar_diagnostico(r):
                     soma_ret = round(r['Ret_ISS'] + r['Ret_PIS'] + r['Ret_COFINS'] + r['Ret_CSLL'] + r['Ret_IRRF'], 2)
                     v_bruto = round(r['Vlr_Bruto'], 2)
                     v_liq = round(r['Vlr_Liquido'], 2)
                     v_ded = round(r['Vlr_Deducao'], 2)
                     
-                    # Teste 1: Serviço Padrão (Bruto - Retenções = Líquido)
-                    if abs(round(v_bruto - soma_ret, 2) - v_liq) <= 0.05:
-                        return "✅ Valores batem (Serviço Padrão)."
+                    # Prova Real Universal: Bruto - Dedução - Retenções = Líquido
+                    liquido_calculado = round(v_bruto - v_ded - soma_ret, 2)
                     
-                    # Teste 2: Construção Civil (Bruto - Dedução - Retenções = Líquido)
-                    if abs(round(v_bruto - v_ded - soma_ret, 2) - v_liq) <= 0.05:
-                        return "✅ Valores batem (Construção Civil)."
-                    
-                    # Teste 3: Apenas Dedução (Bruto - Dedução = Líquido)
-                    if abs(round(v_bruto - v_ded, 2) - v_liq) <= 0.05:
-                        return "✅ Valores batem (Dedução aplicada)."
-
-                    # Se nada bater, calcula a discrepância com base no cenário mais provável
-                    gap = round(v_bruto - v_ded - soma_ret - v_liq, 2)
-                    return f"❌ Erro: Discrepância de R$ {gap}"
+                    if abs(liquido_calculado - v_liq) <= 0.05:
+                        return "✅ Auditoria Ok."
+                    else:
+                        gap = round(liquido_calculado - v_liq, 2)
+                        return f"❌ Erro: Discrepância de R$ {gap}"
 
                 df['Diagnostico'] = df.apply(realizar_diagnostico, axis=1)
 
@@ -250,5 +241,6 @@ if uploaded_files:
                 )
 
 # --- PRÓXIMO PASSO ---
-# Esta versão testa 3 cenários diferentes antes de acusar erro. 
-# Isso deve resolver o problema das notas comuns e da nota de obra simultaneamente. Gostaria de testar?
+# A coluna Vlr_Deducao agora isola o valor da tag <vDR> ou <vDedRed>.
+# Com isso, a conta (Bruto - Dedução - Retenções = Líquido) deve fechar.
+# Rodamos o teste para validar?
