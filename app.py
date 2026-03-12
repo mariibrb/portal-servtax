@@ -84,21 +84,25 @@ aplicar_estilo_sentinela_zonas()
 # --- LÓGICA DE PROCESSAMENTO ---
 def get_xml_value(root, tags):
     for tag in tags:
-        # Busca recursiva em qualquer nível do XML para capturar tags dentro de blocos como <piscofins>
+        # Busca recursiva profunda ignorando namespaces para capturar tags como vRetIRRF dentro de tribFed
         element = root.find(f".//{{*}}{tag}")
         if element is None:
             element = root.find(f".//{tag}")
+        
         if element is not None and element.text:
             return element.text.strip()
-    # Se não encontrar nada, retorna 0.00 para campos numéricos identificados por prefixos ou palavras-chave
+            
+    # Fallback para campos numéricos
     return "0.00" if any(x in str(tags).lower() for x in ['vlr', 'valor', 'iss', 'pis', 'cofins', 'ir', 'csll', 'liq', 'trib', 'v_']) else ""
 
 def process_xml_file(content, filename):
     try:
         tree = ET.parse(io.BytesIO(content))
         root = tree.getroot()
+        
+        # Captura de flags de retenção para lógica do ISS
         iss_retido_flag = get_xml_value(root, ['ISSRetido']).lower()
-        tp_ret_flag = get_xml_value(root, ['tpRetISSQN'])
+        tp_ret_flag = get_xml_value(root, ['tpRetISSQN', 'tpRetISS'])
         
         row = {
             'Arquivo': filename,
@@ -114,16 +118,18 @@ def process_xml_file(content, filename):
             'Ret_PIS': get_xml_value(root, ['vPis', 'vPIS', 'ValorPIS', 'vPIS_Ret', 'PISRetido', 'vRetPIS']),
             'Ret_COFINS': get_xml_value(root, ['vCofins', 'vCOFINS', 'ValorCOFINS', 'vCOFINS_Ret', 'COFINSRetido', 'vRetCOFINS']),
             'Ret_CSLL': get_xml_value(root, ['vRetCSLL', 'vCSLL', 'ValorCSLL', 'vCSLL_Ret', 'CSLLRetido', 'vRetCSLL']),
-            'Ret_IRRF': get_xml_value(root, ['vIR', 'ValorIR', 'vIR_Ret', 'IRRetido', 'vRetIR', 'vIRRF']),
+            'Ret_IRRF': get_xml_value(root, ['vRetIRRF', 'vIRRF', 'vIR', 'ValorIR', 'vIR_Ret', 'IRRetido', 'vRetIR']),
             'Descricao': get_xml_value(root, ['CodigoServico', 'itemServico', 'cServ', 'xDescServ', 'Discriminacao', 'xServ', 'infCpl', 'xProd'])
         }
 
+        # Lógica de ISS Retido baseada em flags de sistema
         if tp_ret_flag == '2' or iss_retido_flag == 'true':
              row['Ret_ISS'] = get_xml_value(root, ['vTotTribMun', 'vISSRetido', 'ValorISS_Retido', 'vRetISS', 'vISSRet', 'iss/vRet'])
         elif iss_retido_flag == 'false' or tp_ret_flag == '1':
              row['Ret_ISS'] = "0.00"
         else:
              row['Ret_ISS'] = get_xml_value(root, ['vTotTribMun', 'vISSRetido', 'ValorISS_Retido', 'vRetISS', 'vISSRet', 'iss/vRet'])
+             
         return row
     except:
         return None
@@ -140,7 +146,7 @@ with col1:
         <ol>
             <li><b>Upload:</b> Arraste arquivos <b>.XML</b> ou <b>.ZIP</b> abaixo.</li>
             <li><b>Ação:</b> Clique em <b>"INICIAR AUDITORIA"</b>.</li>
-            <li><b>Conferência:</b> Analise o <b>Diagnóstico</b> detalhado de divergências.</li>
+            <li><b>Conferência:</b> Analise o <b>Diagnóstico</b> de cruzamento bruto vs líquido.</li>
             <li><b>Saída:</b> Baixe o Excel final para auditoria.</li>
         </ol>
     </div>
@@ -151,10 +157,10 @@ with col2:
     <div class="instrucoes-card">
         <h3>📊 O que será obtido?</h3>
         <ul>
-            <li><b>Leitura Universal:</b> Mapeamento recursivo de tags federais (vPis, vCofins, vRetCSLL).</li>
-            <li><b>Análise Aritmética:</b> Cruzamento de Retenções vs Valor Líquido.</li>
-            <li><b>Impostos Federais:</b> Captura de PIS, COFINS, CSLL e IRRF.</li>
-            <li><b>Diagnóstico:</b> Explicação textual do erro encontrado.</li>
+            <li><b>Mapeamento Estendido:</b> Captura de vRetIRRF, vPis, vCofins e vRetCSLL.</li>
+            <li><b>Hierarquia Fiscal:</b> Processamento de blocos tribMun e tribFed.</li>
+            <li><b>Auditória Automática:</b> Prova real entre retenções e valor líquido.</li>
+            <li><b>Relatório:</b> Diagnóstico detalhado por nota processada.</li>
         </ul>
     </div>
     """, unsafe_allow_html=True)
@@ -184,22 +190,23 @@ if uploaded_files:
                 for col in cols_fin:
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
 
-                # --- LÓGICA DE DIAGNÓSTICO DETALHADO ---
+                # --- LÓGICA DE DIAGNÓSTICO ---
                 def realizar_diagnostico(r):
                     soma_retencoes = r['Ret_ISS'] + r['Ret_PIS'] + r['Ret_COFINS'] + r['Ret_CSLL'] + r['Ret_IRRF']
                     diferenca_apurada = round(r['Vlr_Bruto'] - r['Vlr_Liquido'], 2)
                     soma_retencoes = round(soma_retencoes, 2)
                     
                     if abs(diferenca_apurada - soma_retencoes) <= 0.02:
-                        return "✅ Valores batem com as retenções identificadas."
+                        return "✅ Valores batem com as retenções."
                     elif diferenca_apurada == 0 and r['Vlr_Bruto'] > 0:
                         return "⚠️ Nota sem retenções (Bruto = Líquido)."
                     else:
                         gap = round(diferenca_apurada - soma_retencoes, 2)
-                        return f"❌ Erro: Faltam R$ {gap} em retenções para fechar o Líquido."
+                        return f"❌ Erro: Faltam R$ {gap} em retenções."
 
                 df['Diagnostico'] = df.apply(realizar_diagnostico, axis=1)
 
+                # Reordenação de colunas para facilitar auditoria
                 cols = list(df.columns)
                 if 'Ret_ISS' in cols and 'ISS_Valor' in cols:
                     cols.insert(cols.index('ISS_Valor') + 1, cols.pop(cols.index('Ret_ISS')))
@@ -231,5 +238,5 @@ if uploaded_files:
                 )
 
 # --- PRÓXIMO PASSO ---
-# Os valores de PIS (20.14), COFINS (92.94) e CSLL (30.98) agora devem aparecer corretamente.
-# Você gostaria que eu incluísse também a captura da Base de Cálculo (vBCPisCofins) em uma coluna separada?
+# A tag <vRetIRRF> (1.59) agora será capturada corretamente.
+# Deseja que eu adicione uma coluna para identificar o Tipo de Retenção de ISS (tpRetISSQN) para ajudar a conferir por que o ISS foi ou não retido?
