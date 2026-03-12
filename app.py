@@ -84,12 +84,14 @@ aplicar_estilo_sentinela_zonas()
 # --- LÓGICA DE PROCESSAMENTO ---
 def get_xml_value(root, tags):
     for tag in tags:
+        # Busca recursiva em qualquer nível do XML para capturar tags dentro de blocos como <piscofins>
         element = root.find(f".//{{*}}{tag}")
         if element is None:
             element = root.find(f".//{tag}")
         if element is not None and element.text:
             return element.text.strip()
-    return "0.00" if any(x in tag.lower() for x in ['vlr', 'valor', 'iss', 'pis', 'cofins', 'ir', 'csll', 'liquido', 'trib']) else ""
+    # Se não encontrar nada, retorna 0.00 para campos numéricos identificados por prefixos ou palavras-chave
+    return "0.00" if any(x in str(tags).lower() for x in ['vlr', 'valor', 'iss', 'pis', 'cofins', 'ir', 'csll', 'liq', 'trib', 'v_']) else ""
 
 def process_xml_file(content, filename):
     try:
@@ -109,9 +111,9 @@ def process_xml_file(content, filename):
             'Vlr_Bruto': get_xml_value(root, ['vServ', 'ValorServicos', 'vNF', 'vServPrest/vServ', 'ValorTotal']),
             'Vlr_Liquido': get_xml_value(root, ['vLiq', 'ValorLiquidoNFe', 'vLiqNFSe', 'vLiquido', 'vServPrest/vLiq']),
             'ISS_Valor': get_xml_value(root, ['vISS', 'ValorISS', 'vISSQN', 'iss/vISS']),
-            'Ret_PIS': get_xml_value(root, ['vPIS', 'ValorPIS', 'vPIS_Ret', 'PISRetido', 'vRetPIS']),
-            'Ret_COFINS': get_xml_value(root, ['vCOFINS', 'ValorCOFINS', 'vCOFINS_Ret', 'COFINSRetido', 'vRetCOFINS']),
-            'Ret_CSLL': get_xml_value(root, ['vCSLL', 'ValorCSLL', 'vCSLL_Ret', 'CSLLRetido', 'vRetCSLL']),
+            'Ret_PIS': get_xml_value(root, ['vPis', 'vPIS', 'ValorPIS', 'vPIS_Ret', 'PISRetido', 'vRetPIS']),
+            'Ret_COFINS': get_xml_value(root, ['vCofins', 'vCOFINS', 'ValorCOFINS', 'vCOFINS_Ret', 'COFINSRetido', 'vRetCOFINS']),
+            'Ret_CSLL': get_xml_value(root, ['vRetCSLL', 'vCSLL', 'ValorCSLL', 'vCSLL_Ret', 'CSLLRetido', 'vRetCSLL']),
             'Ret_IRRF': get_xml_value(root, ['vIR', 'ValorIR', 'vIR_Ret', 'IRRetido', 'vRetIR', 'vIRRF']),
             'Descricao': get_xml_value(root, ['CodigoServico', 'itemServico', 'cServ', 'xDescServ', 'Discriminacao', 'xServ', 'infCpl', 'xProd'])
         }
@@ -138,7 +140,7 @@ with col1:
         <ol>
             <li><b>Upload:</b> Arraste arquivos <b>.XML</b> ou <b>.ZIP</b> abaixo.</li>
             <li><b>Ação:</b> Clique em <b>"INICIAR AUDITORIA"</b>.</li>
-            <li><b>Conferência:</b> Analise o <b>Diagnóstico</b> de divergências.</li>
+            <li><b>Conferência:</b> Analise o <b>Diagnóstico</b> detalhado de divergências.</li>
             <li><b>Saída:</b> Baixe o Excel final para auditoria.</li>
         </ol>
     </div>
@@ -149,10 +151,10 @@ with col2:
     <div class="instrucoes-card">
         <h3>📊 O que será obtido?</h3>
         <ul>
-            <li><b>Leitura Universal:</b> Dados de centenas de prefeituras consolidados.</li>
-            <li><b>Gestão de ISS:</b> Separação entre ISS Próprio e Retido.</li>
+            <li><b>Leitura Universal:</b> Mapeamento recursivo de tags federais (vPis, vCofins, vRetCSLL).</li>
+            <li><b>Análise Aritmética:</b> Cruzamento de Retenções vs Valor Líquido.</li>
             <li><b>Impostos Federais:</b> Captura de PIS, COFINS, CSLL e IRRF.</li>
-            <li><b>Diagnóstico:</b> Identificação de notas com retenções pendentes.</li>
+            <li><b>Diagnóstico:</b> Explicação textual do erro encontrado.</li>
         </ul>
     </div>
     """, unsafe_allow_html=True)
@@ -182,7 +184,21 @@ if uploaded_files:
                 for col in cols_fin:
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
 
-                df['Diagnostico'] = df.apply(lambda r: "⚠️ Divergência!" if abs(r['Vlr_Bruto'] - r['Vlr_Liquido']) > 0.01 else "✅", axis=1)
+                # --- LÓGICA DE DIAGNÓSTICO DETALHADO ---
+                def realizar_diagnostico(r):
+                    soma_retencoes = r['Ret_ISS'] + r['Ret_PIS'] + r['Ret_COFINS'] + r['Ret_CSLL'] + r['Ret_IRRF']
+                    diferenca_apurada = round(r['Vlr_Bruto'] - r['Vlr_Liquido'], 2)
+                    soma_retencoes = round(soma_retencoes, 2)
+                    
+                    if abs(diferenca_apurada - soma_retencoes) <= 0.02:
+                        return "✅ Valores batem com as retenções identificadas."
+                    elif diferenca_apurada == 0 and r['Vlr_Bruto'] > 0:
+                        return "⚠️ Nota sem retenções (Bruto = Líquido)."
+                    else:
+                        gap = round(diferenca_apurada - soma_retencoes, 2)
+                        return f"❌ Erro: Faltam R$ {gap} em retenções para fechar o Líquido."
+
+                df['Diagnostico'] = df.apply(realizar_diagnostico, axis=1)
 
                 cols = list(df.columns)
                 if 'Ret_ISS' in cols and 'ISS_Valor' in cols:
@@ -205,7 +221,7 @@ if uploaded_files:
                         if col in cols_fin:
                             worksheet.set_column(i, i, 18, num_fmt)
                         else:
-                            worksheet.set_column(i, i, 22)
+                            worksheet.set_column(i, i, 25)
 
                 st.download_button(
                     label="📥 BAIXAR EXCEL AJUSTADO",
@@ -213,3 +229,7 @@ if uploaded_files:
                     file_name="portal_servtax_auditoria.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
+
+# --- PRÓXIMO PASSO ---
+# Os valores de PIS (20.14), COFINS (92.94) e CSLL (30.98) agora devem aparecer corretamente.
+# Você gostaria que eu incluísse também a captura da Base de Cálculo (vBCPisCofins) em uma coluna separada?
