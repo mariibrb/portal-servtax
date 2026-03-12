@@ -124,7 +124,6 @@ def process_xml_file(content, filename):
             'Descricao': get_xml_value(root, ['CodigoServico', 'itemServico', 'cServ', 'xDescServ', 'Discriminacao', 'xServ', 'infCpl', 'xProd'])
         }
 
-        # Lógica rigorosa de ISS Retido
         if tp_ret_flag == '2' or iss_retido_flag == 'true':
              row['Ret_ISS'] = get_xml_value(root, ['vTotTribMun', 'vISSRetido', 'ValorISS_Retido', 'vRetISS', 'vISSRet', 'iss/vRet'])
         else:
@@ -136,34 +135,6 @@ def process_xml_file(content, filename):
 
 # --- ÁREA VISUAL ---
 st.title("PORTAL TAX NFS-e - AUDITORIA FISCAL")
-
-col1, col2 = st.columns(2)
-
-with col1:
-    st.markdown("""
-    <div class="instrucoes-card">
-        <h3>📖 Passo a Passo</h3>
-        <ol>
-            <li><b>Upload:</b> Arraste arquivos <b>.XML</b> ou <b>.ZIP</b> abaixo.</li>
-            <li><b>Ação:</b> Clique em <b>"INICIAR AUDITORIA"</b>.</li>
-            <li><b>Conferência:</b> Veja os Totais e o Diagnóstico inteligente.</li>
-            <li><b>Saída:</b> Baixe o Excel com Filtros e Subtotais.</li>
-        </ol>
-    </div>
-    """, unsafe_allow_html=True)
-
-with col2:
-    st.markdown("""
-    <div class="instrucoes-card">
-        <h3>📊 Inteligência de Auditoria</h3>
-        <ul>
-            <li><b>Detecção de Retenção:</b> Diferencia imposto informativo de imposto retido.</li>
-            <li><b>Subtotais:</b> Soma automática de todos os valores financeiros.</li>
-            <li><b>Filtros:</b> Arquivo Excel com filtros e formatação condicional.</li>
-            <li><b>Prova Real:</b> Diagnóstico ajustado para notas com ou sem retenções.</li>
-        </ul>
-    </div>
-    """, unsafe_allow_html=True)
 
 st.markdown("---")
 
@@ -190,22 +161,21 @@ if uploaded_files:
                 for col in cols_fin:
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
 
-                # --- LÓGICA DE DIAGNÓSTICO INTELIGENTE ---
+                # --- LÓGICA DE DIAGNÓSTICO CORRIGIDA PARA OBRAS ---
                 def realizar_diagnostico(r):
-                    # Diferença real entre o que deveria ser pago e o que foi pago
-                    diferenca_real = round(r['Vlr_Bruto'] - r['Vlr_Deducao'] - r['Vlr_Liquido'], 2)
+                    # Valor que efetivamente deve ser considerado após a dedução de materiais/obra
+                    base_pos_deducao = round(r['Vlr_Bruto'] - r['Vlr_Deducao'], 2)
                     
-                    # Se não há diferença, a nota está correta (sem retenções)
-                    if abs(diferenca_real) <= 0.05:
-                        return "✅ Valores batem (Sem retenções)."
-                    
-                    # Se há diferença, verificamos se ela coincide com a soma das retenções capturadas
+                    # Soma das retenções que saem do bolso do tomador
                     soma_retencoes = round(r['Ret_ISS'] + r['Ret_PIS'] + r['Ret_COFINS'] + r['Ret_CSLL'] + r['Ret_IRRF'], 2)
                     
-                    if abs(diferenca_real - soma_retencoes) <= 0.05:
-                        return "✅ Valores batem com as retenções."
+                    # Cálculo do líquido esperado: (Bruto - Dedução) - Retenções
+                    liquido_esperado = round(base_pos_deducao - soma_retencoes, 2)
+                    
+                    if abs(liquido_esperado - r['Vlr_Liquido']) <= 0.05:
+                        return "✅ Valores batem perfeitamente."
                     else:
-                        gap = round(diferenca_real - soma_retencoes, 2)
+                        gap = round(liquido_esperado - r['Vlr_Liquido'], 2)
                         return f"❌ Erro: Discrepância de R$ {gap}"
 
                 df['Diagnostico'] = df.apply(realizar_diagnostico, axis=1)
@@ -274,5 +244,5 @@ if uploaded_files:
                 )
 
 # --- PRÓXIMO PASSO ---
-# Esta versão agora valida primeiro se o Bruto é igual ao Líquido. Se for, ela ignora os impostos informativos.
-# Deseja testar com as notas que estavam dando erro para confirmarmos a correção?
+# A lógica de diagnóstico foi simplificada para: (Bruto - Dedução) - Retenções = Líquido.
+# Isso deve zerar a discrepância nas notas de obra. Deseja rodar o teste agora?
